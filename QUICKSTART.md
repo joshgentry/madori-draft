@@ -60,7 +60,7 @@ tray menu's Restore submenu.
 | `-fix_zorder <0\|1\|2>` | 1 | Z-order preservation: 0=none, 1=snapshot restore only, 2=all restores |
 | `-disable_offscreen_fix` | false | Disable automatic correction of off-screen windows |
 | `-enhanced_offscreen_fix` | false | Use 4-corner off-screen detection instead of 2-corner |
-| `-fix_unminimized_restore` | true | Restore unminimized window position after a display change |
+| `-fix_minimized_restore` | true | Handle the positioning of minimized window restores after a display change in place of Windows |
 | `-disable_fast_restore` | false | Use slower but more thorough 5-pass restore instead of 2-pass |
 | `-window_parking_method <method>` | hook | Right-click minimize detection method: `hook` (WH_MOUSE_LL, default) or `poll` |
 | `-disable_window_parking` | false | Disable minimize-to-tray entirely (no hook or polling) |
@@ -69,7 +69,6 @@ tray menu's Restore submenu.
 | `-disable_notifications` | false | Disable notification balloons during snapshots and auto-restore |
 | `-prompt_session_restore` | false | Ask before restoring windows when unlocking a session |
 | `-dpi_sensitive_call` | false | Enable per-monitor DPI context switching during restore |
-| `-pos_match_threshold <pixels>` | 40 | Window position match threshold for killed-window inheritance |
 | `-ignore_process <names>` | (none) | Semicolon-separated list of process names to exclude |
 | `-care_process <names>` | (none) | Semicolon-separated list of process names to include (whitelist) |
 | `-debug_process <names>` | (none) | Semicolon-separated list of process names to debug |

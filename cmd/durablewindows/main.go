@@ -32,14 +32,13 @@ var (
 	showDesktop          bool
 	offscreenFix         bool
 	enhancedOffscreenFix bool
-	fixUnminimizedRestore bool
+	fixMinimizedRestore bool
 	restoreSnapshot      int
 	captureSnapshot      int
 	restoreParkedWindows bool
 	portableMode         bool
 	redirectAppdata      string
 	promptSessionRestore bool
-	posMatchThreshold    int
 	fixZorderSpecified   bool
 	disableNotifications bool
 	disableFastRestore   bool
@@ -94,6 +93,7 @@ func main() {
 	// Create system tray app
 	trayApp := tray.NewTrayApp(proc)
 	trayApp.SetGlobalTrayApp(trayApp)
+	trayApp.SetSilent(silent)
 	trayApp.SetNotification(!disableNotifications)
 
 	// Run the message pump (blocks until quit)
@@ -127,14 +127,13 @@ func parseFlags() {
 	flag.BoolVar(&showDesktop, "show_desktop_when_display_changes", false, "Show desktop on display change")
 	flag.BoolVar(&offscreenFix, "disable_offscreen_fix", false, "Disable off-screen window fix")
 	flag.BoolVar(&enhancedOffscreenFix, "enhanced_offscreen_fix", false, "Enhanced off-screen fix")
-	flag.BoolVar(&fixUnminimizedRestore, "fix_unminimized_restore", true, "Restore unminimized window position after display change")
+	flag.BoolVar(&fixMinimizedRestore, "fix_minimized_restore", true, "Restore unminimized window position after display change")
 	flag.IntVar(&restoreSnapshot, "restore_snapshot", -1, "Restore snapshot by ID")
 	flag.IntVar(&captureSnapshot, "capture_snapshot", -1, "Capture snapshot by ID")
 	flag.BoolVar(&restoreParkedWindows, "restore_parked_windows", false, "Restore all parked windows from database and exit")
 	flag.BoolVar(&portableMode, "portable_mode", false, "Portable mode (data in user_data/)")
 	flag.StringVar(&redirectAppdata, "redirect_appdata", "", "Override app data directory")
 	flag.BoolVar(&promptSessionRestore, "prompt_session_restore", false, "Prompt before session restore")
-	flag.IntVar(&posMatchThreshold, "pos_match_threshold", 40, "Window position match threshold")
 	flag.BoolVar(&disableFastRestore, "disable_fast_restore", false, "Disable fast restore")
 	flag.BoolVar(&dpiSensitiveCall, "dpi_sensitive_call", false, "Enable DPI-aware thread context switching")
 	flag.BoolVar(&redrawDesktop, "redraw_desktop", false, "Force desktop redraw after restore")
@@ -197,7 +196,6 @@ func handleOneShotCommands(appDataFolder string) bool {
 func applySettings(proc *engine.Processor) {
 	proc.UserForcedCaptureLatency = int(delayAutoCapture * 1000)
 	proc.UserForcedRestoreLatency = int(delayAutoRestore * 1000)
-	proc.MaxDiffPos = posMatchThreshold
 
 	if ignoreProcess != "" {
 		proc.SetIgnoreProcess(ignoreProcess)
@@ -218,7 +216,7 @@ func applySettings(proc *engine.Processor) {
 	proc.ShowDesktop = showDesktop
 	proc.EnableOffScreenFix = !offscreenFix
 	proc.EnhancedOffScreenFix = enhancedOffscreenFix
-	proc.FixUnminimizedRestore = fixUnminimizedRestore
+	proc.FixMinimizedRestore = fixMinimizedRestore
 	proc.PromptSessionRestore = promptSessionRestore
 	proc.UsePollParking = (windowParkingMethod == "poll")
 	if disableWindowParking {

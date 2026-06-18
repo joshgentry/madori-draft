@@ -28,7 +28,6 @@ const (
 	MaxSnapshots           = 38 // 0-9, a-z, ` and final one for undo
 	MaxHistoryQueueLength  = 41 // ideally bigger than MaxSnapshots + 2
 	MinClassNamePrefix     = 8  // allow partial class name matching
-	DefaultMaxDiffPos      = 40 // allow matching window of slightly different position
 
 	SyncCommandTimeoutMs        = 200
 	SyncCommandTaskbarTimeoutMs = 500
@@ -88,7 +87,6 @@ type Processor struct {
 	// Foreground tracking
 	foreGroundWindow     uintptr
 	prevForeGroundWindow uintptr
-	realForeGroundWindow uintptr
 
 	// Capture state
 	captureTimerStarted   int
@@ -122,7 +120,7 @@ type Processor struct {
 	RedrawDesktop                bool
 	EnableOffScreenFix           bool
 	EnhancedOffScreenFix         bool
-	FixUnminimizedRestore        bool
+	FixMinimizedRestore        bool
 	PromptSessionRestore         bool
 	AutoRestoreLiveWindowsFromDb bool
 	enableDualPosSwitch          bool
@@ -132,7 +130,6 @@ type Processor struct {
 	resolveHwndCollision         bool
 	rejectScaleFactorChange      bool
 	captureFloatingWindow        bool
-	MaxDiffPos                   int
 
 	// Process lists
 	careProcess   map[string]bool
@@ -220,14 +217,13 @@ func NewProcessor() *Processor {
 		FastRestore:                  true,
 		FixZorder:                    1,
 		EnableOffScreenFix:           true,
-		FixUnminimizedRestore:        true,
+		FixMinimizedRestore:        true,
 		enableDualPosSwitch:          true,
 		EnableMinimizeToTray:         true,
 		resolveHwndCollision:         true,
 		captureFloatingWindow:        true,
 		rejectScaleFactorChange:      true,
 		AutoRestoreLiveWindowsFromDb: true,
-		MaxDiffPos:                   DefaultMaxDiffPos,
 		HaltRestore:                  3000,
 	}
 }
@@ -426,7 +422,7 @@ func (p *Processor) onMinimizeEnd(evt WindowEvent) {
 
 	// Treat the unminimized window as foreground so the foreground
 	// timer fires ActivateWindow to restore its pre-display-change
-	// position (if fixUnminimizedRestore is enabled).
+	// position (if fixMinimizedRestore is enabled).
 	p.foreGroundWindow = evt.HWnd
 	p.startForegroundTimer()
 }
@@ -677,23 +673,7 @@ func (p *Processor) onForegroundTimer() {
 		p.startCaptureTimer(CaptureLatency / 2)
 	}
 
-	ctrlState := winapi.GetKeyState(winapi.VK_CONTROL)
-	altState := winapi.GetKeyState(winapi.VK_MENU)
-	shiftState := winapi.GetKeyState(winapi.VK_SHIFT)
-	ctrlPressed := (uint16(ctrlState) & 0x8000) != 0
-	altPressed := (uint16(altState) & 0x8000) != 0
-	shiftPressed := (uint16(shiftState) & 0x8000) != 0
-
-	// When neither Ctrl nor Shift is held, restore the unminimized
-	// window's position (ActivateWindow handles the
-	// fixUnminimizedRestore logic internally).
-	if !ctrlPressed && !shiftPressed {
-		p.ActivateWindow(hwnd)
-	}
-
-	if altPressed && !ctrlPressed {
-		// Reserved for Alt-based window swap (not yet ported from C#)
-	}
+	p.ActivateWindow(hwnd)
 }
 
 func (p *Processor) onCaptureTimer() {
@@ -741,6 +721,7 @@ func (p *Processor) onRestoreFinishedTimer() {
 	displayKey := winapi.GetDisplayKey()
 	if p.restoreHalted || displayKey != p.curDisplayKey {
 		p.restoreHalted = false
+		p.lastDisplayChangeTime = time.Now()
 		logger.AutoCapture("restore aborted", "for %s", displayKey)
 		if p.HaltRestore > 0 {
 			p.curDisplayKey = displayKey
@@ -974,6 +955,18 @@ func (p *Processor) OnPowerSuspend() {
 		p.EndDisplaySession()
 	}
 	logger.AutoCapture("system suspending", "")
+}
+
+// NoteDisplayChange handles a display configuration change (monitor
+// connect/disconnect, resolution change). It records the change time
+// (used by ActivateWindow for fixMinimizedRestore) and triggers an
+// automatic restore so windows are repositioned for the new layout.
+func (p *Processor) NoteDisplayChange() {
+	p.mu.Lock()
+	p.lastDisplayChangeTime = time.Now()
+	p.restoringFromMem = true
+	p.mu.Unlock()
+	p.StartRestoreTimer()
 }
 
 // OnPowerResume handles system resume events.

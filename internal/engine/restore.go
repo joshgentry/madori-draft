@@ -378,7 +378,7 @@ func (p *Processor) ActivateWindow(hwnd uintptr) {
 		return
 	}
 
-	if p.FixUnminimizedRestore {
+	if p.FixMinimizedRestore {
 		// Only restore if the capture predates the last display
 		// change. Captures taken after the display change already
 		// reflect the current layout and don't need correction.
@@ -402,10 +402,10 @@ func (p *Processor) ActivateWindow(hwnd uintptr) {
 		return
 	}
 
-	// Fallback: if fixUnminimizedRestore is disabled but off-screen
+	// Fallback: if fixMinimizedRestore is disabled but off-screen
 	// fix is enabled, center the window if it's off-screen.
 	if p.EnableOffScreenFix && p.isOffScreen(hwnd) {
-		logger.AutoCapture("off-screen fix", "%s (fixUnminimizedRestore disabled)",
+		logger.AutoCapture("off-screen fix", "%s (fixMinimizedRestore disabled)",
 			p.WindowDesc(hwnd))
 		p.CenterWindow(hwnd)
 	}
@@ -457,10 +457,4 @@ func (p *Processor) showDesktop() {
 		}
 		hwnd = winapi.GetWindow(hwnd, winapi.GW_HWNDNEXT)
 	}
-}
-
-// PromptSessionRestore shows a message box asking the user to confirm restore.
-func (p *Processor) promptSessionRestore() {
-	winapi.MessageBox(0, "Proceed to restore windows?",
-		"DurableWindows", winapi.MB_OK|winapi.MB_ICONINFORMATION)
 }

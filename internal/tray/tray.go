@@ -123,7 +123,9 @@ func windowProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 	case winapi.WM_TRAYICON:
 		return handleTrayMessage(wParam, lParam)
 	case winapi.WM_DISPLAYCHANGE:
-		onDisplayChange()
+		if t := globalTrayApp; t != nil {
+			t.processor.NoteDisplayChange()
+		}
 		return 0
 	case winapi.WM_WTSSESSION_CHANGE:
 		onSessionChange(uint32(wParam))
@@ -586,7 +588,6 @@ func snapshotCharToID(c byte) int {
 	return -1
 }
 
-func onDisplayChange() {}
 func onSessionChange(reason uint32) {
 	t := globalTrayApp
 	if t == nil {

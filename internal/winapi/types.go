@@ -1,7 +1,6 @@
 package winapi
 
 import (
-	"math"
 	"unsafe"
 )
 
@@ -29,15 +28,6 @@ func (r RECT) Height() int32 { return r.Bottom - r.Top }
 func (r RECT) Equals(other RECT) bool {
 	return r.Left == other.Left && r.Top == other.Top &&
 		r.Right == other.Right && r.Bottom == other.Bottom
-}
-
-// Diff returns the average absolute difference between two RECTs.
-func (r RECT) Diff(other RECT) int32 {
-	diff := int32(math.Abs(float64(r.Left-other.Left)) +
-		math.Abs(float64(r.Right-other.Right)) +
-		math.Abs(float64(r.Top-other.Top)) +
-		math.Abs(float64(r.Bottom-other.Bottom)))
-	return diff / 4
 }
 
 // WINDOWPLACEMENT represents the Windows WINDOWPLACEMENT structure.
