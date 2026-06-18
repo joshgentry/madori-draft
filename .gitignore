@@ -1,0 +1,10 @@
+﻿obj/
+*.suo
+bin/
+lib/
+packages/
+.vs/
+CLAUDE.md
+.claude/
+build/
+*.syso

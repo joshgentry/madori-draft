@@ -1,0 +1,28 @@
+{
+  "RT_VERSION": {
+    "#1": {
+      "0000": {
+        "fixed": {
+          "file_version": "1.0.0.0",
+          "product_version": "1.0.0.0"
+        },
+        "info": {
+          "0409": {
+            "Comments": "",
+            "CompanyName": "",
+            "FileDescription": "Durable Windows",
+            "FileVersion": "1.0.0",
+            "InternalName": "durablewindows",
+            "LegalCopyright": "",
+            "LegalTrademarks": "",
+            "OriginalFilename": "durablewindows.exe",
+            "PrivateBuild": "",
+            "ProductName": "DurableWindows",
+            "ProductVersion": "1.0.0",
+            "SpecialBuild": ""
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,466 @@
+package engine
+
+import (
+	"time"
+
+	"durablewindows/internal/logger"
+	"durablewindows/internal/models"
+	"durablewindows/internal/winapi"
+)
+
+// BatchRestoreApplicationsOnCurrentDisplays performs multi-pass window restore.
+func (p *Processor) BatchRestoreApplicationsOnCurrentDisplays() {
+	if p.PauseAutoRestore {
+		return
+	}
+
+	p.iconBusy = true
+	if !p.restoringSnapshot && p.callbacks.ShowRestoreTip != nil {
+		p.callbacks.ShowRestoreTip()
+	} else if p.restoringSnapshot && p.callbacks.ShowSnapshotRestoreTip != nil {
+		p.callbacks.ShowSnapshotRestoreTip(p.snapshotId)
+	}
+
+	// Boost priority during restore
+	boostPriority()
+	defer restorePriority()
+
+	p.sessionActive = false
+
+	displayKey := p.curDisplayKey
+
+	// Show desktop first if configured
+	if p.ShowDesktop {
+		p.showDesktop()
+	}
+
+	maxPasses := MaxRestoreTimes
+	if p.FastRestore {
+		maxPasses = MinRestoreTimes
+	}
+
+	for pass := 0; pass < maxPasses; pass++ {
+		p.restoreTimes = pass + 1
+		p.RestoreApplicationsOnCurrentDisplays(displayKey, 0, time.Now())
+
+		// Always restore z-order
+		p.RestoreZorder(displayKey)
+	}
+
+	// Redraw desktop after restore if configured
+	if p.RedrawDesktop {
+		winapi.RedrawWindow(0, nil, 0, winapi.RDW_INVALIDATE|winapi.RDW_ALLCHILDREN)
+	}
+
+	// Start the finish timer
+	p.StartRestoreFinishedTimer(MaxRestoreLatency)
+}
+
+// RestoreApplicationsOnCurrentDisplays restores windows for a single display config.
+func (p *Processor) RestoreApplicationsOnCurrentDisplays(displayKey string, targetHwnd uintptr, restoreTime time.Time) {
+	source := p.monitorApplications[displayKey]
+	if source == nil {
+		return
+	}
+
+	for hwnd, metricsList := range source {
+		if targetHwnd != 0 && hwnd != targetHwnd {
+			continue
+		}
+		if len(metricsList) == 0 {
+			continue
+		}
+
+		// Skip windows that no longer exist or shouldn't be tracked
+		// (cloaked ghost frames, dead processes, etc.).
+		if !p.shouldTrackWindow(hwnd) {
+			continue
+		}
+
+		// Find the best metrics to restore
+		metrics := p.findBestRestoreMetrics(hwnd, metricsList, restoreTime)
+		if metrics == nil {
+			continue
+		}
+
+		p.restoreSingleWindow(hwnd, metrics)
+		p.restoredWindows[hwnd] = true
+		// Multi-pass restore runs up to 5 times; only log on the
+		// first pass to avoid confusing double-output.
+		if p.restoreTimes == 1 {
+			logger.Snapshot("window restored", "%s", p.WindowDesc(hwnd))
+		}
+	}
+}
+
+func (p *Processor) findBestRestoreMetrics(hwnd uintptr, metricsList []*models.WindowMetrics, restoreTime time.Time) *models.WindowMetrics {
+	if len(metricsList) == 0 {
+		return nil
+	}
+
+	// If we have a snapshot, find the one matching the snapshot.
+	// Search newest-to-oldest so a fresh snapshot wins over a stale
+	// entry from a previous session that still carries the same bit.
+	if p.restoringSnapshot {
+		for i := len(metricsList) - 1; i >= 0; i-- {
+			if metricsList[i].HasSnapshotID(p.snapshotId) {
+				return metricsList[i]
+			}
+		}
+		// Fallback to last capture with any snapshot
+		for i := len(metricsList) - 1; i >= 0; i-- {
+			if metricsList[i].HasSnapshot() {
+				return metricsList[i]
+			}
+		}
+	}
+
+	// Default: use the last capture
+	return metricsList[len(metricsList)-1]
+}
+
+func (p *Processor) restoreSingleWindow(hwnd uintptr, metrics *models.WindowMetrics) {
+	if !winapi.IsWindow(hwnd) {
+		return
+	}
+	if p.noRestoreWindows[hwnd] || p.noRestoreWindowsTmp[hwnd] {
+		return
+	}
+	if IsMinimized(hwnd) {
+		// Skip windows on other virtual desktops
+		if p.vdManager != nil && !p.vdManager.IsWindowOnCurrentVirtualDesktop(hwnd) {
+			return
+		}
+
+		// If the saved metrics show the window was NOT minimized when
+		// captured, unminimize it before restoring position. Otherwise
+		// a minimized window stays minimized even when restoring a
+		// snapshot taken while it was visible.
+		if metrics.WindowPlacement.ShowCmd != winapi.SW_SHOWMINIMIZED &&
+			metrics.WindowPlacement.ShowCmd != winapi.SW_MINIMIZE {
+			winapi.ShowWindow(hwnd, winapi.SW_RESTORE)
+		} else {
+			return // window was minimized when captured — leave it minimized
+		}
+	}
+
+	// DPI-aware call before position operations
+	var dpiCtx uintptr
+	if p.DpiSensitiveCall {
+		dpiCtx = dpiAwareCall()
+	}
+
+	// Restore window placement
+	if metrics.WindowPlacement.Length > 0 {
+		wp := metrics.WindowPlacement
+		wp.Length = uint32(winapi.DefaultWINDOWPLACEMENT().Length)
+
+		// Don't restore to minimized state
+		if wp.ShowCmd == winapi.SW_SHOWMINIMIZED || wp.ShowCmd == winapi.SW_MINIMIZE {
+			wp.ShowCmd = winapi.SW_SHOWNORMAL
+		}
+
+		winapi.SetWindowPlacement(hwnd, &wp)
+	}
+
+	// Move to saved screen position.
+	// If the window was minimized when captured, GetWindowRect returned the
+	// parking position (-32000, -32000) — skip MoveWindow so we don't undo
+	// the correct NormalPosition that SetWindowPlacement just restored.
+	if !metrics.IsMinimized {
+		pos := metrics.ScreenPosition
+		winapi.MoveWindow(hwnd, pos.Left, pos.Top, pos.Width(), pos.Height(), true)
+	}
+
+	// Fix top-most state
+	if metrics.IsTopMost {
+		winapi.SetWindowPos(hwnd, ^uintptr(0), 0, 0, 0, 0,
+			winapi.SWP_NOMOVE|winapi.SWP_NOSIZE|winapi.SWP_NOACTIVATE)
+	} else if metrics.NeedClearTopMost {
+		winapi.SetWindowPos(hwnd, 1, 0, 0, 0, 0,
+			winapi.SWP_NOMOVE|winapi.SWP_NOSIZE|winapi.SWP_NOACTIVATE)
+	}
+
+	// Restore DPI context
+	if dpiCtx != 0 {
+		winapi.SetThreadDpiAwarenessContext(int32(dpiCtx))
+	}
+
+	// Fix off-screen windows
+	if p.EnableOffScreenFix && p.isOffScreen(hwnd) {
+		var rect winapi.RECT
+		winapi.GetWindowRect(hwnd, &rect)
+		logger.Snapshot("off-screen fix", "%s rect=(%d,%d %dx%d) saved=(%d,%d %dx%d) minimized=%v",
+			p.WindowDesc(hwnd),
+			rect.Left, rect.Top, rect.Width(), rect.Height(),
+			metrics.ScreenPosition.Left, metrics.ScreenPosition.Top,
+			metrics.ScreenPosition.Width(), metrics.ScreenPosition.Height(),
+			metrics.IsMinimized)
+		logMonitors()
+		p.FixOffScreenWindow(hwnd)
+	}
+}
+
+// FixOffScreenWindow moves a window that is off-screen back into view.
+func (p *Processor) FixOffScreenWindow(hwnd uintptr) {
+	var rect winapi.RECT
+	if !winapi.GetWindowRect(hwnd, &rect) {
+		return
+	}
+
+	displays := winapi.GetDisplays()
+	if len(displays) == 0 {
+		return
+	}
+
+	// Check if at least part of the window is on any display
+	for _, d := range displays {
+		var intersect winapi.RECT
+		if winapi.IntersectRect(&intersect, &rect, &d.Position) {
+			if intersect.Width() > 10 && intersect.Height() > 10 {
+				return // window is visible enough
+			}
+		}
+	}
+
+	// Move to primary display
+	primary := displays[0]
+	newX := primary.Position.Left + 50
+	newY := primary.Position.Top + 50
+	newW := rect.Width()
+	newH := rect.Height()
+	if newW > primary.Position.Width()-100 {
+		newW = primary.Position.Width() - 100
+	}
+	if newH > primary.Position.Height()-100 {
+		newH = primary.Position.Height() - 100
+	}
+
+	winapi.MoveWindow(hwnd, newX, newY, newW, newH, true)
+	winapi.SetForegroundWindow(hwnd)
+}
+
+// isOffScreen checks if a window is completely off all displays.
+func (p *Processor) isOffScreen(hwnd uintptr) bool {
+	if IsMinimized(hwnd) {
+		return false
+	}
+	var rect winapi.RECT
+	if !winapi.GetWindowRect(hwnd, &rect) {
+		return false
+	}
+	if rect.Width() <= 10 || rect.Height() <= 10 {
+		return false
+	}
+	return p.isRectOffScreen(rect)
+}
+
+func (p *Processor) isRectOffScreen(rect winapi.RECT) bool {
+	corners := [][2]int32{
+		{rect.Left + 10, rect.Top + 10},
+		{rect.Left + rect.Width() - 10, rect.Top + 10},
+	}
+	if p.EnhancedOffScreenFix {
+		corners = append(corners,
+			[2]int32{rect.Left + 10, rect.Top + rect.Height() - 10},
+			[2]int32{rect.Left + rect.Width() - 10, rect.Top + rect.Height() - 10},
+		)
+	}
+	for _, c := range corners {
+		pt := winapi.POINT{X: c[0], Y: c[1]}
+		if winapi.MonitorFromPoint(pt, winapi.MONITOR_DEFAULTTONULL) != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// logMonitors dumps the current display layout for off-screen diagnostics.
+func logMonitors() {
+	for i, d := range winapi.GetDisplays() {
+		logger.Snapshot("", "  monitor %d: (%d,%d %dx%d)",
+			i, d.Position.Left, d.Position.Top, d.Position.Width(), d.Position.Height())
+	}
+}
+
+// RetryDeferredCommands retries commands that timed out during restore.
+func (p *Processor) RetryDeferredCommands() {
+	for hwnd, cmds := range p.deferredCommands {
+		if !winapi.IsWindow(hwnd) {
+			continue
+		}
+		for _, cmd := range cmds {
+			// Longer timeout for retries
+			winapi.SendMessageTimeout(hwnd, uint32(cmd.kind), uintptr(cmd.val), 0,
+				winapi.SMTO_ABORTIFHUNG, SyncCommandRetryTimeoutMs)
+		}
+	}
+	p.deferredCommands = make(map[uintptr][]command)
+}
+
+// RestoreAllParked restores windows that were right-click-minimized to tray.
+func (p *Processor) RestoreAllParked() {
+	for _, hwnd := range p.GetMinimizedToTrayWindows() {
+		p.RestoreFromTray(hwnd)
+	}
+}
+
+// ActivateWindow handles a window that was just unminimized. If the
+// window was previously captured as minimized and a display change has
+// occurred since that capture, it restores the window's pre-minimize
+// position so it doesn't land somewhere incorrect on the new layout.
+func (p *Processor) ActivateWindow(hwnd uintptr) {
+	if !winapi.IsWindow(hwnd) {
+		return
+	}
+	if IsMinimized(hwnd) {
+		return // defensive: window still minimized, shouldn't happen
+	}
+	if p.noRestoreWindows[hwnd] {
+		return
+	}
+
+	metricsList, ok := p.monitorApplications[p.curDisplayKey][hwnd]
+	if !ok || len(metricsList) == 0 {
+		// Window not tracked — only attempt off-screen fix
+		if p.EnableOffScreenFix && p.isOffScreen(hwnd) {
+			logger.AutoCapture("off-screen fix", "%s (untracked)",
+				p.WindowDesc(hwnd))
+			p.FixOffScreenWindow(hwnd)
+		}
+		return
+	}
+
+	// Get the most recent capture for this window.
+	prevMetrics := metricsList[len(metricsList)-1]
+
+	// Discard fast captures triggered by the unminimize event itself.
+	// A capture taken within 400ms of unminimize may reflect the
+	// window mid-animation or at a transient position.
+	diff := prevMetrics.CaptureTime.Sub(p.lastUnminimizeTime)
+	if diff > 0 && diff < 400*time.Millisecond {
+		metricsList = metricsList[:len(metricsList)-1]
+		p.monitorApplications[p.curDisplayKey][hwnd] = metricsList
+		if len(metricsList) == 0 {
+			return
+		}
+		newLast := metricsList[len(metricsList)-1]
+		if !newLast.IsFullScreen {
+			// The previous capture already had a valid normal
+			// position — no restore needed.
+			metricsList = append(metricsList, prevMetrics)
+			p.monitorApplications[p.curDisplayKey][hwnd] = metricsList
+			return
+		}
+		prevMetrics = newLast
+	}
+
+	// Only act if the previous capture shows the window was minimized.
+	// If the capture shows the window was visible (not minimized), its
+	// position is already correct on the current display layout.
+	if !prevMetrics.IsMinimized {
+		return
+	}
+
+	// Validate position data. A minimized capture may have garbage
+	// ScreenPosition (GetWindowRect returns -32000,-32000 for
+	// minimized windows) or a ShowCmd indicating the window was
+	// still minimized when captured.
+	targetRect := prevMetrics.ScreenPosition
+	showCmd := prevMetrics.WindowPlacement.ShowCmd
+	if showCmd == winapi.SW_SHOWMINIMIZED || showCmd == winapi.SW_MINIMIZE || targetRect.Left <= -25600 {
+		return
+	}
+
+	// Skip if the window is already at the target position.
+	var currentRect winapi.RECT
+	if winapi.GetWindowRect(hwnd, &currentRect) && currentRect.Equals(targetRect) {
+		return
+	}
+
+	if p.FixUnminimizedRestore {
+		// Only restore if the capture predates the last display
+		// change. Captures taken after the display change already
+		// reflect the current layout and don't need correction.
+		if !p.lastDisplayChangeTime.IsZero() && !prevMetrics.CaptureTime.Before(p.lastDisplayChangeTime) {
+			return
+		}
+
+		// Skip borderless windows (no WS_CAPTION style). These
+		// are often custom-drawn UI or full-screen overlays.
+		style := winapi.GetWindowLong(hwnd, winapi.GWL_STYLE)
+		if style&winapi.WS_CAPTION == 0 {
+			return
+		}
+
+		logger.AutoCapture("unminimize restore", "%s \u2192 (%d,%d %dx%d)",
+			p.WindowDesc(hwnd),
+			targetRect.Left, targetRect.Top,
+			targetRect.Width(), targetRect.Height())
+
+		p.restoreSingleWindow(hwnd, prevMetrics)
+		return
+	}
+
+	// Fallback: if fixUnminimizedRestore is disabled but off-screen
+	// fix is enabled, center the window if it's off-screen.
+	if p.EnableOffScreenFix && p.isOffScreen(hwnd) {
+		logger.AutoCapture("off-screen fix", "%s (fixUnminimizedRestore disabled)",
+			p.WindowDesc(hwnd))
+		p.CenterWindow(hwnd)
+	}
+}
+
+
+func (p *Processor) CenterWindow(hwnd uintptr) {
+	desktop := winapi.GetDesktopWindow()
+	var targetRect winapi.RECT
+	winapi.GetWindowRect(desktop, &targetRect)
+	winapi.MoveWindow(hwnd,
+		targetRect.Left+targetRect.Width()/4,
+		targetRect.Top+targetRect.Height()/4,
+		targetRect.Width()/2,
+		targetRect.Height()/2,
+		true,
+	)
+}
+
+// RecallLastPosition restores a window to its previously captured position.
+func (p *Processor) RecallLastPosition(hwnd uintptr) {
+	if apps, ok := p.monitorApplications[p.curDisplayKey]; ok {
+		if metricsList, ok := apps[hwnd]; ok && len(metricsList) >= 2 {
+			last := metricsList[len(metricsList)-1]
+			pos := last.ScreenPosition
+			winapi.MoveWindow(hwnd, pos.Left, pos.Top, pos.Width(), pos.Height(), true)
+			winapi.SetForegroundWindow(hwnd)
+		}
+	}
+}
+
+// FgWindowToBottom sends the foreground window to the bottom of the z-order.
+func (p *Processor) FgWindowToBottom() {
+	fg := p.foreGroundWindow
+	if fg == 0 {
+		return
+	}
+	winapi.SetWindowPos(fg, 1, 0, 0, 0, 0,
+		winapi.SWP_NOMOVE|winapi.SWP_NOSIZE|winapi.SWP_NOACTIVATE)
+}
+
+// showDesktop minimizes all top-level windows to show the desktop.
+func (p *Processor) showDesktop() {
+	desktop := winapi.GetDesktopWindow()
+	hwnd := winapi.GetWindow(desktop, winapi.GW_CHILD)
+	for hwnd != 0 {
+		if winapi.IsWindowVisible(hwnd) && winapi.IsTopLevelWindow(hwnd) && !IsMinimized(hwnd) {
+			winapi.ShowWindowAsync(hwnd, winapi.SW_MINIMIZE)
+		}
+		hwnd = winapi.GetWindow(hwnd, winapi.GW_HWNDNEXT)
+	}
+}
+
+// PromptSessionRestore shows a message box asking the user to confirm restore.
+func (p *Processor) promptSessionRestore() {
+	winapi.MessageBox(0, "Proceed to restore windows?",
+		"DurableWindows", winapi.MB_OK|winapi.MB_ICONINFORMATION)
+}
