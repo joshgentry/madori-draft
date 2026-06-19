@@ -906,9 +906,9 @@ func FormatWindowDesc(processName, title, className string) string {
 				title = string(runes[:41]) + "…"
 			}
 		}
-		return fmt.Sprintf("-- %s (%s) --", title, processName)
+		return fmt.Sprintf("｢%s (%s)｣", title, processName)
 	}
-	return fmt.Sprintf("-- [no title, class=%q] (%s) --", className, processName)
+	return fmt.Sprintf("｢[no title, class=%q] (%s)｣", className, processName)
 }
 
 // WindowDesc returns a formatted window description for logging, using the
