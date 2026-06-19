@@ -181,7 +181,6 @@ func (t *TrayApp) Run() error {
 	t.running = true
 	t.mu.Unlock()
 
-	winapi.SetProcessDpiAwarenessContext(winapi.DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
 
 	hInstance := winapi.GetModuleHandle(nil)
 

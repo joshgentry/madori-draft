@@ -114,7 +114,6 @@ type Processor struct {
 
 	// Feature flags
 	FastRestore                  bool
-	DpiSensitiveCall             bool
 	FixZorder                    int
 	ShowDesktop                  bool
 	RedrawDesktop                bool
@@ -241,6 +240,14 @@ func (p *Processor) Start(autoRestoreFromDB, autoRestoreLastCapture bool) error 
 	p.vdManager = winapi.InitVirtualDesktopManager()
 
 	p.sessionActive = true
+
+	// Set this thread to per-monitor DPI-aware V2. The process-level
+	// SetProcessDpiAwarenessContext call covers most threads, but
+	// Go may schedule goroutines onto OS threads created before that
+	// call. We never restore — every thread this app touches should
+	// use physical coordinates.
+	winapi.SetThreadDpiAwarenessContext(winapi.DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
+
 	p.curDisplayKey = winapi.GetDisplayKey()
 	p.prevDisplayKey = p.curDisplayKey
 	p.normalSessions[p.curDisplayKey] = true

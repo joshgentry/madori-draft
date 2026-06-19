@@ -58,7 +58,6 @@ tray menu's Restore submenu.
 | `-show_desktop_when_display_changes` | false | Minimize all windows before restoring |
 | `-disable_notifications` | false | Disable notification balloons during snapshots and auto-restore |
 | `-prompt_session_restore` | false | Ask before restoring windows when unlocking a session |
-| `-dpi_sensitive_call` | false | Enable per-monitor DPI context switching during restore |
 | `-ignore_process <names>` | (none) | Semicolon-separated list of process names to exclude |
 | `-care_process <names>` | (none) | Semicolon-separated list of process names to include (whitelist) |
 | `-debug_process <names>` | (none) | Semicolon-separated list of process names to debug |

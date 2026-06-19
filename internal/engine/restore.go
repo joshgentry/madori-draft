@@ -36,6 +36,9 @@ func (p *Processor) BatchRestoreApplicationsOnCurrentDisplays() {
 
 	p.sessionActive = false
 
+	// Ensure this goroutine's OS thread is per-monitor DPI-aware.
+	winapi.SetThreadDpiAwarenessContext(winapi.DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
+
 	displayKey := p.curDisplayKey
 
 	// Show desktop first if configured
@@ -173,12 +176,6 @@ func (p *Processor) restoreSingleWindow(hwnd uintptr, metrics *models.WindowMetr
 		}
 	}
 
-	// DPI-aware call before position operations
-	var dpiCtx uintptr
-	if p.DpiSensitiveCall {
-		dpiCtx = dpiAwareCall()
-	}
-
 	// Restore window placement
 	if metrics.WindowPlacement.Length > 0 {
 		wp := metrics.WindowPlacement
@@ -199,11 +196,6 @@ func (p *Processor) restoreSingleWindow(hwnd uintptr, metrics *models.WindowMetr
 	if !metrics.IsMinimized {
 		pos := metrics.ScreenPosition
 		winapi.MoveWindow(hwnd, pos.Left, pos.Top, pos.Width(), pos.Height(), true)
-	}
-
-	// Restore DPI context
-	if dpiCtx != 0 {
-		winapi.SetThreadDpiAwarenessContext(int32(dpiCtx))
 	}
 
 	// Fix top-most state

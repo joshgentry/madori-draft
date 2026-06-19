@@ -45,7 +45,6 @@ var (
 	disableFastRestore    bool
 	disableWindowParking  bool
 	windowParkingKeyGrace int
-	dpiSensitiveCall      bool
 	redrawDesktop         bool
 )
 
@@ -62,6 +61,15 @@ func main() {
 	logger.SetCategories(logCategories)
 	logger.DisableCategories(noLogCategories)
 	logger.Event("", "%s %s starting", productName, version)
+
+	// Set process-wide DPI awareness early — before any window is created.
+	// Without this, GetWindowRect / SetWindowPlacement coordinates are
+	// virtualized by Windows on mixed-DPI multi-monitor systems.
+	// Thread-level calls in engine.Start / batch functions cover goroutines
+	// that land on threads created before this point.
+	if !winapi.SetProcessDpiAwarenessContext(winapi.DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) {
+		logger.Error("", "SetProcessDpiAwarenessContext failed — per-monitor DPI may not be active at process level (thread-level calls will still apply)")
+	}
 
 	// Determine app data folder
 	appDataFolder := resolveAppDataFolder()
@@ -136,7 +144,6 @@ func parseFlags() {
 	flag.StringVar(&redirectAppdata, "redirect_appdata", "", "Override app data directory")
 	flag.BoolVar(&promptSessionRestore, "prompt_session_restore", false, "Prompt before session restore")
 	flag.BoolVar(&disableFastRestore, "disable_fast_restore", false, "Disable fast restore")
-	flag.BoolVar(&dpiSensitiveCall, "dpi_sensitive_call", false, "Enable DPI-aware thread context switching")
 	flag.BoolVar(&redrawDesktop, "redraw_desktop", false, "Force desktop redraw after restore")
 	flag.BoolVar(&disableNotifications, "disable_notifications", false, "Disable notification balloons")
 	flag.IntVar(&windowParkingKeyGrace, "window_parking_key_grace", 300, "Grace period (ms) after Shift release for minimize-to-tray")
@@ -171,11 +178,6 @@ func resolveAppDataFolder() string {
 }
 
 func handleOneShotCommands(appDataFolder string) bool {
-	// Match the DPI-awareness set by the GUI path (tray.go). Without this,
-	// GetWindowRect / SetWindowPlacement coordinates are virtualized by
-	// Windows and come out wrong on mixed-DPI multi-monitor systems.
-	winapi.SetProcessDpiAwarenessContext(winapi.DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
-
 	proc := engine.NewProcessor()
 	proc.AppDataFolder = appDataFolder
 
@@ -224,7 +226,6 @@ func applySettings(proc *engine.Processor) {
 		proc.EnableMinimizeToTray = false
 	}
 	proc.RedrawDesktop = redrawDesktop
-	proc.DpiSensitiveCall = dpiSensitiveCall
 	if disableFastRestore {
 		proc.FastRestore = false
 	}

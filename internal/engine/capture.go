@@ -12,6 +12,9 @@ import (
 
 // BatchCaptureApplicationsOnCurrentDisplays captures all windows on the current display config.
 func (p *Processor) BatchCaptureApplicationsOnCurrentDisplays() {
+	// Ensure this goroutine's OS thread is per-monitor DPI-aware.
+	winapi.SetThreadDpiAwarenessContext(winapi.DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
+
 	displayKey := p.curDisplayKey
 
 	p.CaptureNewDisplayConfig(displayKey)
@@ -353,11 +356,6 @@ func (p *Processor) UndoCapture(after time.Time) {
 			}
 		}
 	}
-}
-
-// DPI-aware set thread context before capture
-func dpiAwareCall() uintptr {
-	return winapi.SetThreadDpiAwarenessContext(winapi.DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
 }
 
 // isTaskBarWindow returns true if hwnd is a taskbar window.
