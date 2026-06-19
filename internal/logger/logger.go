@@ -280,11 +280,9 @@ func writeLog(categoryName, color string, eventID uint32, event, msg string) {
 	if event != "" {
 		formatted = fmt.Sprintf("%s %s[%s]%s %s : %s",
 			ts, color, categoryName, ColorReset, event, msg)
-		// Avoid doubled dashes when message starts with a window
-		// description (-- ProcessName.exe - Title --).
-		formatted = strings.Replace(formatted, " -- -- ", " -- ", 1)
+		// Avoid trailing strangeness due to component formatting
 		formatted = strings.TrimSpace(formatted)
-		formatted = strings.TrimSuffix(formatted, " --")
+		formatted = strings.TrimSuffix(formatted, " :")
 	} else {
 		formatted = fmt.Sprintf("%s %s[%s]%s %s",
 			ts, color, categoryName, ColorReset, msg)
