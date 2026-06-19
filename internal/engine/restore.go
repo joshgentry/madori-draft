@@ -411,7 +411,6 @@ func (p *Processor) ActivateWindow(hwnd uintptr) {
 	}
 }
 
-
 func (p *Processor) CenterWindow(hwnd uintptr) {
 	desktop := winapi.GetDesktopWindow()
 	var targetRect winapi.RECT

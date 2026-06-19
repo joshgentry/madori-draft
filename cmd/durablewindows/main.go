@@ -32,7 +32,7 @@ var (
 	showDesktop          bool
 	offscreenFix         bool
 	enhancedOffscreenFix bool
-	fixMinimizedRestore bool
+	fixMinimizedRestore  bool
 	restoreSnapshot      int
 	captureSnapshot      int
 	restoreParkedWindows bool

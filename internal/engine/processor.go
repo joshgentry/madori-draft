@@ -120,7 +120,7 @@ type Processor struct {
 	RedrawDesktop                bool
 	EnableOffScreenFix           bool
 	EnhancedOffScreenFix         bool
-	FixMinimizedRestore        bool
+	FixMinimizedRestore          bool
 	PromptSessionRestore         bool
 	AutoRestoreLiveWindowsFromDb bool
 	enableDualPosSwitch          bool
@@ -217,7 +217,7 @@ func NewProcessor() *Processor {
 		FastRestore:                  true,
 		FixZorder:                    1,
 		EnableOffScreenFix:           true,
-		FixMinimizedRestore:        true,
+		FixMinimizedRestore:          true,
 		enableDualPosSwitch:          true,
 		EnableMinimizeToTray:         true,
 		resolveHwndCollision:         true,
