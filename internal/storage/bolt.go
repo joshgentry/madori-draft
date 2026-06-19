@@ -318,7 +318,10 @@ func (s *Store) SaveDisplayKeyTimestamp(displayKey string, t time.Time) error {
 // PruneDisplayKeys deletes live_<dk> and dead_<dk> buckets for display keys
 // that are not among the most recent maxKeep (oldest LRU eviction).
 // _snapshot_times entries for pruned keys are also removed.
-func (s *Store) PruneDisplayKeys(maxKeep int) error {
+//
+// Keys in preserve are never evicted (nor do they count toward maxKeep)
+// — use this to protect display configs that have active snapshot data.
+func (s *Store) PruneDisplayKeys(maxKeep int, preserve map[string]bool) error {
 	if maxKeep <= 0 {
 		return nil
 	}
@@ -336,6 +339,10 @@ func (s *Store) PruneDisplayKeys(maxKeep int) error {
 			return nil // nothing to prune
 		}
 		var entries []entry
+		preserved := make(map[string]bool, len(preserve))
+		for k := range preserve {
+			preserved[k] = true
+		}
 		meta.ForEach(func(k, v []byte) error {
 			var t time.Time
 			if err := t.UnmarshalBinary(v); err == nil {
@@ -343,12 +350,20 @@ func (s *Store) PruneDisplayKeys(maxKeep int) error {
 			}
 			return nil
 		})
-		if len(entries) <= maxKeep {
+		// Exclude preserved keys from the eviction pool — they neither count
+		// toward the limit nor get pruned.
+		candidates := entries[:0]
+		for _, e := range entries {
+			if !preserved[e.key] {
+				candidates = append(candidates, e)
+			}
+		}
+		if len(candidates) <= maxKeep {
 			return nil
 		}
 		// Sort oldest-first
-		sort.Slice(entries, func(i, j int) bool { return entries[i].ts.Before(entries[j].ts) })
-		toPrune := entries[:len(entries)-maxKeep]
+		sort.Slice(candidates, func(i, j int) bool { return candidates[i].ts.Before(candidates[j].ts) })
+		toPrune := candidates[:len(candidates)-maxKeep]
 
 		for _, e := range toPrune {
 			// Delete live_ and dead_ buckets

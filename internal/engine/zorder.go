@@ -178,7 +178,14 @@ func (p *Processor) LoadFromDB() {
 	// Kept display keys are determined by _display_key_meta timestamps (updated on
 	// every PersistToDB). Without this, every unique monitor layout ever seen
 	// (dock/undock, resolution changes) persists forever.
-	store.PruneDisplayKeys(25)
+	//
+	// Display keys with snapshot data are preserved — pruning them would silently
+	// destroy the snapshot (the metrics with snapshot bits live in live_<dk>).
+	snapshotDKs := make(map[string]bool, len(p.snapshotTakenTime))
+	for dk := range p.snapshotTakenTime {
+		snapshotDKs[dk] = true
+	}
+	store.PruneDisplayKeys(25, snapshotDKs)
 }
 
 // ResetState clears temporary restore state.
