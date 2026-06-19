@@ -137,6 +137,17 @@ func (p *Processor) findBestRestoreMetrics(hwnd uintptr, metricsList []*models.W
 	return metricsList[len(metricsList)-1]
 }
 
+func doesWindowPositionMatch(hwnd uintptr, metrics *models.WindowMetrics) bool {
+	var currentRect winapi.RECT
+	if winapi.GetWindowRect(hwnd, &currentRect) {
+		targetRect := metrics.ScreenPosition
+		if !metrics.IsMinimized && currentRect.Equals(targetRect) {
+			return true
+		}
+	}
+	return false
+}
+
 func (p *Processor) restoreSingleWindow(hwnd uintptr, metrics *models.WindowMetrics) restoreResult {
 	if !winapi.IsWindow(hwnd) {
 		return restoreFiltered
@@ -157,23 +168,25 @@ func (p *Processor) restoreSingleWindow(hwnd uintptr, metrics *models.WindowMetr
 		if metrics.WindowPlacement.ShowCmd != winapi.SW_SHOWMINIMIZED &&
 			metrics.WindowPlacement.ShowCmd != winapi.SW_MINIMIZE {
 			winapi.ShowWindow(hwnd, winapi.SW_RESTORE)
+			if doesWindowPositionMatch(hwnd, metrics) {
+				return restoreRestored
+			}
+			// otherwise we pass through to reposition the newly unminimized window
 		} else {
 			return restoreAlreadyPositioned // minimized when captured, still minimized — correct state
 		}
-	}
-
-	// Check if the window is already at the target position and size.
-	// When a redundant restore fires (e.g. back-to-back display-change
-	// events during monitor wake-up), the window may already be exactly
-	// where a prior restore left it — skip the expensive SetWindowPlacement
-	// and MoveWindow calls in that case. Topmost and off-screen fix are
-	// lightweight and defensive, so they still run.
-	var currentRect winapi.RECT
-	if winapi.GetWindowRect(hwnd, &currentRect) {
-		targetRect := metrics.ScreenPosition
-		if !metrics.IsMinimized && currentRect.Equals(targetRect) {
-			return restoreAlreadyPositioned
-		}
+	} else if doesWindowPositionMatch(hwnd, metrics) {
+		// Check if the window is already at the target position and size.
+		// When a redundant restore fires (e.g. back-to-back display-change
+		// events during monitor wake-up), the window may already be exactly
+		// where a prior restore left it — skip the expensive SetWindowPlacement
+		// and MoveWindow calls in that case. Topmost and off-screen fix are
+		// lightweight and defensive, so they still run.
+		//
+		// Skip this check if we just unminimized the window — the unminimize
+		// itself is a real restore action, even if Windows happened to place
+		// the window at the same coordinates the metrics recorded.
+		return restoreAlreadyPositioned
 	}
 
 	// Restore window placement

@@ -181,7 +181,6 @@ func (t *TrayApp) Run() error {
 	t.running = true
 	t.mu.Unlock()
 
-
 	hInstance := winapi.GetModuleHandle(nil)
 
 	className := windows.StringToUTF16Ptr(windowClassName)
