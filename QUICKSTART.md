@@ -4,6 +4,11 @@
 A Windows system-tray utility that remembers window positions and restores them
 when display configurations change (monitor connect/disconnect, RDP, sleep/resume).
 
+> **Administrator privileges:** To manage windows owned by elevated
+> processes (Task Manager, administrative consoles, etc.), Madori must
+> itself run as administrator. Without elevation, those windows are
+> simply skipped during capture and restore.
+
 ### Tray Icon
 
 | Action | Result |
