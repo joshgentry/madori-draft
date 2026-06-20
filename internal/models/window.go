@@ -59,12 +59,6 @@ func (m *WindowMetrics) EqualPlacement(other *WindowMetrics) bool {
 	return posEqual && screenEqual && minmaxStateEqual && isMinimizedEqual
 }
 
-// Clone returns a deep copy of the metrics (excluding transient fields).
-func (m *WindowMetrics) Clone() *WindowMetrics {
-	c := *m
-	return &c
-}
-
 // HasSnapshot returns true if any snapshot bit is set.
 func (m *WindowMetrics) HasSnapshot() bool {
 	return m.SnapShotFlags != 0
@@ -80,7 +74,3 @@ func (m *WindowMetrics) SetSnapshotID(id int) {
 	m.SnapShotFlags |= (1 << uint(id))
 }
 
-// ClearSnapshotID clears the snapshot bit for the given ID.
-func (m *WindowMetrics) ClearSnapshotID(id int) {
-	m.SnapShotFlags &^= (1 << uint(id))
-}

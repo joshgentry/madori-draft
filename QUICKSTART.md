@@ -60,7 +60,6 @@ tray menu's Restore submenu.
 | `-prompt_session_restore` | false | Ask before restoring windows when unlocking a session |
 | `-ignore_process <names>` | (none) | Semicolon-separated list of process names to exclude |
 | `-care_process <names>` | (none) | Semicolon-separated list of process names to include (whitelist) |
-| `-debug_process <names>` | (none) | Semicolon-separated list of process names to debug |
 
 ### One-shot Commands (no tray icon, exits after completion)
 

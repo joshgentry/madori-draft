@@ -28,7 +28,6 @@ type TrayApp struct {
 	iconBusy     bool
 	silent       bool
 	notification bool
-	gui          bool
 
 	// singleClickPending: a timer is armed; will fire restore on expiry.
 	singleClickPending bool
@@ -70,12 +69,10 @@ const (
 func NewTrayApp(proc *engine.Processor) *TrayApp {
 	return &TrayApp{
 		processor: proc,
-		gui:       true,
 	}
 }
 
 func (t *TrayApp) SetSilent(s bool) { t.silent = s }
-func (t *TrayApp) SetGUI(g bool)    { t.gui = g }
 
 func (t *TrayApp) SetNotification(n bool) { t.notification = n }
 

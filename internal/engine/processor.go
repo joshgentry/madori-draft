@@ -107,8 +107,6 @@ type featureFlags struct {
 type processFilter struct {
 	careProcess   map[string]bool
 	ignoreProcess map[string]bool
-	debugProcess  map[string]bool
-	debugWindows  map[uintptr]bool
 }
 
 type timerSet struct {
@@ -121,13 +119,11 @@ type timerSet struct {
 type sessionState struct {
 	sessionActive         bool
 	sessionLocked         bool
-	remoteSession         bool
 	PauseAutoRestore      bool
 	curDisplayKey         string
 	prevDisplayKey        string
 	lastDisplayChangeTime time.Time
 	normalSessions        map[string]bool
-	curVirtualDesktop     string
 }
 
 // Processor is the main engine. It mirrors PersistentWindowProcessor in C#.
@@ -148,7 +144,6 @@ type Processor struct {
 
 	// Configuration
 	AppDataFolder string
-	persistDbName string
 
 	// Window tracking
 	windowTitle       map[uintptr]string
@@ -193,9 +188,6 @@ type Processor struct {
 	// Icon state
 	iconBusy bool
 
-	// Taskbar state
-	leftButtonClicks int
-
 	// Database storage
 	store *storage.Store
 
@@ -237,8 +229,6 @@ func New() *Processor {
 		processFilter: processFilter{
 			careProcess:   make(map[string]bool),
 			ignoreProcess: make(map[string]bool),
-			debugProcess:  make(map[string]bool),
-			debugWindows:  make(map[uintptr]bool),
 		},
 		sessionState: sessionState{
 			normalSessions: make(map[string]bool),
@@ -906,13 +896,6 @@ func (p *Processor) SetCareProcess(names string) {
 	}
 }
 
-// SetDebugProcess adds process names to debug list.
-func (p *Processor) SetDebugProcess(names string) {
-	for _, name := range parseProcessList(names) {
-		p.debugProcess[name] = true
-	}
-}
-
 // SetNoinheritProcess adds process names to no-inherit list.
 func parseProcessList(input string) []string {
 	var result []string
@@ -930,11 +913,6 @@ func parseProcessList(input string) []string {
 
 func (p *Processor) GetDisplayKey() string {
 	return winapi.GetDisplayKey()
-}
-
-// GetForegroundWindow returns the current foreground window handle.
-func GetForegroundWindow() uintptr {
-	return winapi.GetForegroundWindow()
 }
 
 // GetWindowTitle returns the title of a window.

@@ -460,28 +460,6 @@ func (p *Processor) CenterWindow(hwnd uintptr) {
 	)
 }
 
-// RecallLastPosition restores a window to its previously captured position.
-func (p *Processor) RecallLastPosition(hwnd uintptr) {
-	if apps, ok := p.monitorApplications[p.curDisplayKey]; ok {
-		if metricsList, ok := apps[hwnd]; ok && len(metricsList) >= 2 {
-			last := metricsList[len(metricsList)-1]
-			pos := last.ScreenPosition
-			winapi.MoveWindow(hwnd, pos.Left, pos.Top, pos.Width(), pos.Height(), true)
-			winapi.SetForegroundWindow(hwnd)
-		}
-	}
-}
-
-// FgWindowToBottom sends the foreground window to the bottom of the z-order.
-func (p *Processor) FgWindowToBottom() {
-	fg := p.foreGroundWindow
-	if fg == 0 {
-		return
-	}
-	winapi.SetWindowPos(fg, 1, 0, 0, 0, 0,
-		winapi.SWP_NOMOVE|winapi.SWP_NOSIZE|winapi.SWP_NOACTIVATE)
-}
-
 // showDesktop minimizes all top-level windows to show the desktop.
 func (p *Processor) showDesktop() {
 	desktop := winapi.GetDesktopWindow()

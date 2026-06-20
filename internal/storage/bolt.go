@@ -211,19 +211,6 @@ func (s *Store) ListDisplayKeys() ([]string, error) {
 	return keys, nil
 }
 
-// DisplayKeyExists checks if a display key has data in the database.
-func (s *Store) DisplayKeyExists(displayKey string) (bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	var exists bool
-	err := s.db.View(func(tx *bolt.Tx) error {
-		exists = tx.Bucket([]byte(displayKey)) != nil
-		return nil
-	})
-	return exists, err
-}
-
 // SaveSnapshotTimes persists snapshot capture timestamps to BoltDB.
 func (s *Store) SaveSnapshotTimes(times map[string]map[int]time.Time) error {
 	s.mu.Lock()

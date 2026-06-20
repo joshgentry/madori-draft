@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"durablewindows/internal/logger"
-	"durablewindows/internal/models"
 	"durablewindows/internal/winapi"
 )
 
@@ -133,32 +132,3 @@ func (p *Processor) CaptureSnapshotCmd(id int) {
 		len(p.monitorApplications[p.curDisplayKey]))
 }
 
-// findMetricsForSnapshot finds the window metrics matching a snapshot ID.
-func (p *Processor) findMetricsForSnapshot(hwnd uintptr, snapshotID int, displayKey string) *models.WindowMetrics {
-	apps, ok := p.monitorApplications[displayKey]
-	if !ok {
-		return nil
-	}
-	metricsList, ok := apps[hwnd]
-	if !ok {
-		return nil
-	}
-
-	// Search from most recent to oldest for matching snapshot
-	for i := len(metricsList) - 1; i >= 0; i-- {
-		if metricsList[i].HasSnapshotID(snapshotID) {
-			return metricsList[i]
-		}
-	}
-
-	// If not found, try undo slot
-	if snapshotID != MaxSnapshots+1 {
-		for i := len(metricsList) - 1; i >= 0; i-- {
-			if metricsList[i].HasSnapshotID(MaxSnapshots + 1) {
-				return metricsList[i]
-			}
-		}
-	}
-
-	return nil
-}

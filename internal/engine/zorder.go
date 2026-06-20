@@ -62,38 +62,6 @@ func (p *Processor) RestoreZorder(displayKey string) {
 	winapi.EndDeferWindowPos(hDWP)
 }
 
-// BatchFixTopMostWindows clears topmost flags where needed after restore.
-func (p *Processor) BatchFixTopMostWindows() {
-	for _, apps := range p.monitorApplications {
-		for hwnd, metricsList := range apps {
-			if len(metricsList) == 0 {
-				continue
-			}
-			last := metricsList[len(metricsList)-1]
-			if last.NeedClearTopMost && !last.IsTopMost {
-				if winapi.IsWindow(hwnd) {
-					winapi.SetWindowPos(hwnd, 1, 0, 0, 0, 0,
-						winapi.SWP_NOMOVE|winapi.SWP_NOSIZE|winapi.SWP_NOACTIVATE)
-				}
-				last.NeedClearTopMost = false
-			}
-			if p.topmostWindowsFixed[hwnd] {
-				continue
-			}
-			if last.IsTopMost {
-				extStyle := winapi.GetWindowLong(hwnd, winapi.GWL_EXSTYLE)
-				if (extStyle & winapi.WS_EX_TOPMOST) == 0 {
-					if winapi.IsWindow(hwnd) {
-						winapi.SetWindowPos(hwnd, ^uintptr(0), 0, 0, 0, 0,
-							winapi.SWP_NOMOVE|winapi.SWP_NOSIZE|winapi.SWP_NOACTIVATE)
-					}
-				}
-				p.topmostWindowsFixed[hwnd] = true
-			}
-		}
-	}
-}
-
 // CaptureZorder records the z-order position of a window relative to its siblings.
 func (p *Processor) CaptureZorder(hwnd uintptr, displayKey string) {
 	apps, ok := p.monitorApplications[displayKey]
@@ -176,11 +144,4 @@ func (p *Processor) LoadFromDB() {
 		snapshotDKs[dk] = true
 	}
 	p.store.PruneDisplayKeys(25, snapshotDKs)
-}
-
-// ResetState clears temporary restore state.
-func (p *Processor) ResetState() {
-	p.restoreTimes = 0
-	p.restoreHalted = false
-	p.noRestoreWindowsTmp = make(map[uintptr]bool)
 }

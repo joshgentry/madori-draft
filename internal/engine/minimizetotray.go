@@ -79,15 +79,6 @@ func (p *Processor) persistParkedWindows() {
 	_ = p.store.SaveParkedWindows(hwnds)
 }
 
-// parkWindow hides the window and queues tray icon creation.
-func (p *Processor) parkWindow(hwnd uintptr) {
-	winapi.ShowWindowAsync(hwnd, winapi.SW_HIDE)
-	p.minimizeToTrayWindows[hwnd] = true
-	p.persistParkedWindows()
-	logger.Parking("minimized to tray", "%s", p.WindowDesc(hwnd))
-	winapi.PostMessage(p.trayHWnd, winapi.WM_APP_PARKED, uintptr(hwnd), 0)
-}
-
 // StartMinimizeToTray installs the WH_KEYBOARD_LL hook that tracks Shift-key
 // state for Shift+minimize parking. Must be called from a thread with a
 // message pump (the tray app's main thread).
@@ -224,13 +215,6 @@ func (p *Processor) restoreOrphanedParkedWindows() {
 // alive, clears the bucket, and exits. Useful as a manual recovery tool.
 func (p *Processor) RestoreParkedWindowsCmd() {
 	p.restoreOrphanedParkedWindows()
-}
-
-// IsMinimizedToTray returns true if the window was parked to tray.
-func (p *Processor) IsMinimizedToTray(hwnd uintptr) bool {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.minimizeToTrayWindows[hwnd]
 }
 
 // GetMinimizedToTrayWindows returns all windows currently parked to tray.

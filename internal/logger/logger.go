@@ -311,8 +311,3 @@ func writeLog(categoryName, color string, eventID uint32, event, msg string) {
 		}
 	}
 }
-
-// StringToUTF16 is a convenience wrapper.
-func StringToUTF16(s string) []uint16 {
-	return windows.StringToUTF16(s)
-}

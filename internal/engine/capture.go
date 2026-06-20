@@ -310,13 +310,6 @@ func (p *Processor) resolveProcessName(pid uint32) string {
 	return winapi.GetProcessName(pid)
 }
 
-// debugWindowEvent logs debug info for windows matching debug process filters.
-func (p *Processor) debugWindowEvent(hwnd uintptr, processName, action string) {
-	if p.debugProcess[processName] {
-		p.debugWindows[hwnd] = true
-	}
-}
-
 // isFullScreen checks if a window covers an entire display (exclusive
 // full-screen, borderless windowed, or browser full-screen). A maximized
 // window won't match because GetWindowRect returns the work area (excluding
@@ -338,24 +331,6 @@ func (p *Processor) isFullScreen(hwnd uintptr) bool {
 func (p *Processor) EndDisplaySession() {
 	p.CancelCaptureTimer()
 	p.BatchCaptureApplicationsOnCurrentDisplays()
-}
-
-// UndoCapture rewinds captures after the given time.
-func (p *Processor) UndoCapture(after time.Time) {
-	for _, apps := range p.monitorApplications {
-		for hwnd, metricsList := range apps {
-			cutIdx := -1
-			for i, m := range metricsList {
-				if m.CaptureTime.After(after) {
-					cutIdx = i
-					break
-				}
-			}
-			if cutIdx >= 0 {
-				apps[hwnd] = metricsList[:cutIdx]
-			}
-		}
-	}
 }
 
 // isTaskBarWindow returns true if hwnd is a taskbar window.
