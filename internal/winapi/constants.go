@@ -477,6 +477,15 @@ const (
 	DWM_CLOAKED_APP       = 1 // cloaked by the owning application
 	DWM_CLOAKED_SHELL     = 2 // cloaked by the shell (virtual desktop, tablet mode)
 	DWM_CLOAKED_INHERITED = 4 // cloaked because owner is cloaked
+
+	// DWMWA_WINDOW_CORNER_PREFERENCE attribute (Windows 11 Build 22000+)
+	DWMWA_WINDOW_CORNER_PREFERENCE = 33
+
+	// DWM_WINDOW_CORNER_PREFERENCE values
+	DWMWCP_DEFAULT    = 0 // let the system decide
+	DWMWCP_DONOTROUND = 1 // never round corners
+	DWMWCP_ROUND      = 2 // round the corners
+	DWMWCP_ROUNDSMALL = 3 // round with a small radius
 )
 
 // DPI awareness contexts

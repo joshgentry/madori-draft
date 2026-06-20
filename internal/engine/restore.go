@@ -2,6 +2,7 @@ package engine
 
 import (
 	"time"
+	"unsafe"
 
 	"madori/internal/logger"
 	"madori/internal/models"
@@ -229,6 +230,25 @@ func (p *Processor) restoreSingleWindow(hwnd uintptr, metrics *models.WindowMetr
 	} else if metrics.NeedClearTopMost {
 		winapi.SetWindowPos(hwnd, 1, 0, 0, 0, 0,
 			winapi.SWP_NOMOVE|winapi.SWP_NOSIZE|winapi.SWP_NOACTIVATE)
+	}
+
+	// Restore DWM corner preference (Windows 11+).
+	// DwmSetWindowAttribute was added in Build 22000 — on older builds
+	// LazyProc.Find panics with a DLLError, which we recover below.
+	if p.CopyCornerPreference && metrics.WindowCornerPreference != 0 {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					if _, isDLL := r.(error); isDLL {
+						// Pre-Win11 — function doesn't exist, not an error.
+						return
+					}
+					panic(r) // unexpected
+				}
+			}()
+			winapi.DwmSetWindowAttribute(hwnd, winapi.DWMWA_WINDOW_CORNER_PREFERENCE,
+				unsafe.Pointer(&metrics.WindowCornerPreference), 4)
+		}()
 	}
 
 	// Fix off-screen windows

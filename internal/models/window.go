@@ -44,6 +44,10 @@ type WindowMetrics struct {
 	NeedRestoreStacking bool    `json:"-"`             // transient — true when StackingRank is valid
 	StackingRank        int     `json:"stacking_rank"` // 0=topmost, -1=unset
 
+	// DWM corner preference (Windows 11+)
+	// 0=DWMWCP_DEFAULT, 1=DWMWCP_DONOTROUND, 2=DWMWCP_ROUND, 3=DWMWCP_ROUNDSMALL
+	WindowCornerPreference uint32 `json:"window_corner_preference"`
+
 	// Snapshot bitfield (up to 64 snapshot IDs)
 	SnapShotFlags uint64 `json:"snapshot_flags"`
 

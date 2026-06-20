@@ -36,6 +36,7 @@ var (
 	offscreenFix               bool
 	enhancedOffscreenFix       bool
 	fixMinimizedRestore        bool
+	disableCornerCopy          bool
 	restoreSnapshot            int
 	captureSnapshot            int
 	restoreParkedWindows       bool
@@ -184,6 +185,7 @@ func parseFlags() {
 	flag.StringVar(&redirectAppdata, "redirect_appdata", "", "Override app data directory")
 	flag.BoolVar(&promptSessionRestore, "prompt_session_restore", false, "Prompt before session restore")
 	flag.BoolVar(&disableFastRestore, "disable_fast_restore", false, "Disable fast restore")
+	flag.BoolVar(&disableCornerCopy, "disable_corner_copy", false, "Do not restore window corner preference (rounded vs square)")
 	flag.BoolVar(&redrawDesktop, "redraw_desktop", false, "Force desktop redraw after restore")
 	flag.BoolVar(&disableNotifications, "disable_notifications", false, "Disable notification balloons")
 	flag.IntVar(&windowParkingKeyGrace, "window_parking_key_grace", 300, "Grace period (ms) after Shift release for minimize-to-tray")
@@ -255,6 +257,9 @@ func applySettings(proc *engine.Processor) {
 	proc.EnableOffScreenFix = !offscreenFix
 	proc.EnhancedOffScreenFix = enhancedOffscreenFix
 	proc.FixMinimizedRestore = fixMinimizedRestore
+	if disableCornerCopy {
+		proc.CopyCornerPreference = false
+	}
 	proc.PromptSessionRestore = promptSessionRestore
 	engine.SetShiftGracePeriod(time.Duration(windowParkingKeyGrace) * time.Millisecond)
 	if disableWindowParking {

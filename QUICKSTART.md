@@ -59,6 +59,7 @@ tray menu's Restore submenu.
 | `-enhanced_offscreen_fix` | false | Use 4-corner off-screen detection instead of 2-corner |
 | `-fix_minimized_restore` | true | Handle the positioning of minimized window restores after a display change in place of Windows |
 | `-disable_fast_restore` | false | Use slower but more thorough 5-pass restore instead of 2-pass |
+| `-disable_corner_copy` | false | Do not restore window corner preference (rounded vs square corners captured on Windows 11) |
 | `-disable_window_parking` | false | Disable Shift+minimize-to-tray entirely |
 | `-redraw_desktop` | false | Force full desktop redraw after restore |
 | `-show_desktop_when_display_changes` | false | Minimize all windows before restoring |

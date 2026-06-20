@@ -138,6 +138,12 @@ func (p *Processor) captureWindowCore(hwnd uintptr, displayKey string) *models.W
 	m.IsResizable = (m.Style & winapi.WS_SIZEBOX) != 0
 	m.IsTopMost = (m.ExtStyle & winapi.WS_EX_TOPMOST) != 0
 
+	// DWM corner preference (Windows 11+). On pre-Win11 builds the
+	// attribute doesn't exist and the call returns false — the field
+	// stays at 0 (DWMWCP_DEFAULT).
+	winapi.DwmGetWindowAttribute(hwnd, winapi.DWMWA_WINDOW_CORNER_PREFERENCE,
+		unsafe.Pointer(&m.WindowCornerPreference), 4)
+
 	// Process info
 	_, pid := winapi.GetWindowThreadProcessId(hwnd)
 	m.ProcessID = pid

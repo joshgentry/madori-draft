@@ -95,6 +95,7 @@ type featureFlags struct {
 	EnableOffScreenFix           bool
 	EnhancedOffScreenFix         bool
 	FixMinimizedRestore          bool
+	CopyCornerPreference         bool
 	PromptSessionRestore         bool
 	AutoRestoreLiveWindowsFromDb bool
 	enableDualPosSwitch          bool
@@ -258,6 +259,7 @@ func New() *Processor {
 			FixStacking:                  1,
 			EnableOffScreenFix:           true,
 			FixMinimizedRestore:          true,
+			CopyCornerPreference:         true,
 			enableDualPosSwitch:          true,
 			EnableTrayParking:            true,
 			resolveHwndCollision:         true,
