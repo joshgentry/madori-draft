@@ -156,8 +156,17 @@ func (p *Processor) restoreSingleWindow(hwnd uintptr, metrics *models.WindowMetr
 		return restoreFiltered
 	}
 	if IsMinimized(hwnd) {
-		// Skip windows on other virtual desktops
-		if p.vdManager != nil && !p.vdManager.IsWindowOnCurrentVirtualDesktop(hwnd) {
+		// Windows blocks all write APIs (SetWindowPlacement,
+		// ShowWindow, MoveWindowToDesktop) for windows on other
+		// virtual desktops, so we have no non-disruptive way to
+		// restore a minimized other-desktop window.
+		if p.vdManager != nil && p.vdManager.Enabled() && !p.vdManager.IsWindowOnCurrentVirtualDesktop(hwnd) {
+			// Only log when there was actual work to do — the window
+			// was visible at capture but is now minimized elsewhere.
+			if !metrics.IsMinimized {
+				logger.Snapshot("vd-restore", "%s skipped: visible at snapshot, now minimized on other desktop — cannot restore across desktops",
+					p.WindowDesc(hwnd))
+			}
 			return restoreFiltered
 		}
 

@@ -14,6 +14,7 @@ var (
 	modOle32VD   = syscall.NewLazyDLL("ole32.dll")
 
 	procCoCreateInstanceVD = modCombaseVD.NewProc("CoCreateInstance")
+	procCLSIDFromStringVD  = modOle32VD.NewProc("CLSIDFromString")
 	procCoInitializeExVD   = modOle32VD.NewProc("CoInitializeEx")
 	procStringFromGUID2VD  = modOle32VD.NewProc("StringFromGUID2")
 )
@@ -161,4 +162,22 @@ func GUIDToString(guid windows.GUID) string {
 		return ""
 	}
 	return syscall.UTF16ToString(buf[:])
+}
+
+// GUIDFromString parses a GUID string (e.g. "{...}" or "00000000-...")
+// back into a windows.GUID. Returns a zero GUID on failure.
+func GUIDFromString(s string) windows.GUID {
+	if s == "" {
+		return windows.GUID{}
+	}
+	var guid windows.GUID
+	hr, _, _ := procCLSIDFromStringVD.Call(
+		uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr(s))),
+		uintptr(unsafe.Pointer(&guid)),
+	)
+	if hr != 0 {
+		logger.Error("", "CLSIDFromString failed for %q: hr=0x%x", s, hr)
+		return windows.GUID{}
+	}
+	return guid
 }
