@@ -55,8 +55,8 @@ func (p *Processor) BatchRestoreApplicationsOnCurrentDisplays() {
 		p.restoreTimes = pass + 1
 		p.RestoreApplicationsOnCurrentDisplays(displayKey, 0, time.Now())
 
-		// Always restore z-order
-		p.RestoreZorder(displayKey)
+		// Always restore stacking
+		p.RestoreStacking(displayKey)
 	}
 
 	// Redraw desktop after restore if configured

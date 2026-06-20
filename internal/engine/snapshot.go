@@ -50,7 +50,7 @@ func (p *Processor) TakeSnapshot(id int) bool {
 
 	// Walk the full z-order chain and assign ranks so we can rebuild
 	// window stacking during restore.
-	p.CaptureZorderAll(displayKey)
+	p.CaptureStackingAll(displayKey)
 
 	// Save undo slot — set previous capture snapshot bit on the second-to-last entry
 	for _, metricsList := range p.monitorApplications[displayKey] {

@@ -89,7 +89,7 @@ type restoreState struct {
 
 type featureFlags struct {
 	FastRestore                  bool
-	FixZorder                    int
+	FixStacking                  int
 	ShowDesktop                  bool
 	RedrawDesktop                bool
 	EnableOffScreenFix           bool
@@ -255,7 +255,7 @@ func New() *Processor {
 		// Default values on sub-structs
 		featureFlags: featureFlags{
 			FastRestore:                  true,
-			FixZorder:                    1,
+			FixStacking:                  1,
 			EnableOffScreenFix:           true,
 			FixMinimizedRestore:          true,
 			enableDualPosSwitch:          true,
@@ -862,8 +862,8 @@ func (p *Processor) resolveHwndConflict(hwnd uintptr) {
 		if liveApps, ok := p.monitorApplications[displayKey]; ok {
 			for _, metricsList := range liveApps {
 				for _, m := range metricsList {
-					if m.PrevZorderWindow == hwnd {
-						m.PrevZorderWindow = fakeHwnd
+					if m.PrevStackingWindow == hwnd {
+						m.PrevStackingWindow = fakeHwnd
 					}
 				}
 			}
@@ -872,8 +872,8 @@ func (p *Processor) resolveHwndConflict(hwnd uintptr) {
 		delete(dead, hwnd)
 		for _, metricsList := range dead {
 			for _, m := range metricsList {
-				if m.PrevZorderWindow == hwnd {
-					m.PrevZorderWindow = fakeHwnd
+				if m.PrevStackingWindow == hwnd {
+					m.PrevStackingWindow = fakeHwnd
 				}
 			}
 		}

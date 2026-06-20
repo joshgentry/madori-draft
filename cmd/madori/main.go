@@ -30,7 +30,7 @@ var (
 	ignoreProcess              string
 	careProcess                string
 	haltRestore                float64
-	fixZorder                  int
+	fixStacking                int
 	showDesktop                bool
 	offscreenFix               bool
 	enhancedOffscreenFix       bool
@@ -41,7 +41,7 @@ var (
 	portableMode               bool
 	redirectAppdata            string
 	promptSessionRestore       bool
-	fixZorderSpecified         bool
+	fixStackingSpecified       bool
 	disableNotifications       bool
 	disableFastRestore         bool
 	disableWindowParking       bool
@@ -155,7 +155,7 @@ func parseFlags() {
 	flag.StringVar(&ignoreProcess, "ignore_process", "", "Process names to ignore (semicolon-separated)")
 	flag.StringVar(&careProcess, "care_process", "", "Only track these processes (exclusive; all others are ignored)")
 	flag.Float64Var(&haltRestore, "halt_restore", 3, "Seconds to wait before retrying restore")
-	flag.IntVar(&fixZorder, "fix_zorder", 1, "Z-order fix: 0=none, 1=snapshot only, 2=all")
+	flag.IntVar(&fixStacking, "fix_stacking", 1, "Stacking fix: 0=none, 1=snapshot only, 2=all")
 	flag.BoolVar(&showDesktop, "show_desktop_when_display_changes", false, "Show desktop on display change")
 	flag.BoolVar(&offscreenFix, "disable_offscreen_fix", false, "Disable off-screen window fix")
 	flag.BoolVar(&enhancedOffscreenFix, "enhanced_offscreen_fix", false, "Enhanced off-screen fix")
@@ -175,10 +175,10 @@ func parseFlags() {
 
 	flag.Parse()
 
-	// Track whether fix_zorder was explicitly set
+	// Track whether fix_stacking was explicitly set
 	flag.Visit(func(f *flag.Flag) {
-		if f.Name == "fix_zorder" {
-			fixZorderSpecified = true
+		if f.Name == "fix_stacking" {
+			fixStackingSpecified = true
 		}
 	})
 }
@@ -231,8 +231,8 @@ func applySettings(proc *engine.Processor) {
 		proc.HaltRestore = int(haltRestore * 1000)
 	}
 
-	if fixZorderSpecified {
-		proc.FixZorder = fixZorder
+	if fixStackingSpecified {
+		proc.FixStacking = fixStacking
 	}
 	proc.ShowDesktop = showDesktop
 	proc.EnableOffScreenFix = !offscreenFix

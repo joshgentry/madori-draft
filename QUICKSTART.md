@@ -48,7 +48,7 @@ tray menu's Restore submenu.
 | `-delay_auto_capture <seconds>` | 3.0 | Lag between window move event and automatic capture |
 | `-delay_auto_restore <seconds>` | 0.5 | Lag between display change and automatic restore |
 | `-halt_restore <seconds>` | 3 | Seconds to wait before retrying a restore that was interrupted by another display change |
-| `-fix_zorder <0\|1\|2>` | 1 | Z-order preservation: 0=none, 1=snapshot restore only, 2=all restores |
+| `-fix_stacking <0\|1\|2>` | 1 | Z-order preservation: 0=none, 1=snapshot restore only, 2=all restores |
 | `-disable_offscreen_fix` | false | Disable automatic correction of off-screen windows |
 | `-enhanced_offscreen_fix` | false | Use 4-corner off-screen detection instead of 2-corner |
 | `-fix_minimized_restore` | true | Handle the positioning of minimized window restores after a display change in place of Windows |
