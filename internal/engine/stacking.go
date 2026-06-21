@@ -192,13 +192,19 @@ func (p *Processor) PersistToDB() {
 		total += len(apps)
 	}
 	logger.AutoCapture(logger.LevelInfo, "", "Auto-saving %d windows to database", total)
+	dbPruned := 0
 	for dk, apps := range p.monitorApplications {
-		p.store.SaveWindowMetrics("live_"+dk, apps)
+		n, _ := p.store.SaveWindowMetrics("live_"+dk, apps)
+		dbPruned += n
 		p.store.SaveDisplayKeyTimestamp(dk, time.Now())
 	}
 	for dk, dead := range p.deadApps {
-		p.store.SaveWindowMetrics("dead_"+dk, dead)
+		n, _ := p.store.SaveWindowMetrics("dead_"+dk, dead)
+		dbPruned += n
 		p.store.SaveDisplayKeyTimestamp(dk, time.Now())
+	}
+	if dbPruned > 0 {
+		logger.AutoCapture(logger.LevelDebug, "", "DB cleanup: removed %d stale entries", dbPruned)
 	}
 	p.store.SaveSnapshotTimes(p.snapshotTakenTime)
 }

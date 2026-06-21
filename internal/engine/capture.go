@@ -38,7 +38,9 @@ func (p *Processor) CaptureWindowsOfInterest(displayKey string) {
 	hwnd := winapi.GetWindow(desktop, winapi.GW_CHILD)
 	count := 0
 	changed := 0
+	seen := make(map[uintptr]bool)
 	for hwnd != 0 {
+		seen[hwnd] = true
 		count++
 		if p.CaptureWindow(hwnd, 0, time.Now(), displayKey) {
 			changed++
@@ -46,6 +48,33 @@ func (p *Processor) CaptureWindowsOfInterest(displayKey string) {
 		hwnd = winapi.GetWindow(hwnd, winapi.GW_HWNDNEXT)
 	}
 	logger.AutoCapture(logger.LevelInfo, "", "Capture cycle: %d windows scanned, %d changed", count, changed)
+
+	// Prune stale entries from the map — HWNDs that were loaded from DB
+	// (prior sessions) or previously captured but no longer exist in the
+	// current enumeration. Entries with snapshot data are preserved so
+	// snapshot-based restores continue to work.
+	pruned := 0
+	for hwnd, metricsList := range p.monitorApplications[displayKey] {
+		if seen[hwnd] {
+			continue
+		}
+		hasSnapshot := false
+		for _, m := range metricsList {
+			if m.HasSnapshot() {
+				hasSnapshot = true
+				break
+			}
+		}
+		if hasSnapshot {
+			continue
+		}
+		delete(p.monitorApplications[displayKey], hwnd)
+		pruned++
+	}
+	if pruned > 0 {
+		logger.AutoCapture(logger.LevelDebug, "", "Pruned %d stale entries from %s (preserved %d with snapshots)",
+			pruned, displayKey, len(p.monitorApplications[displayKey]))
+	}
 }
 
 // CaptureWindow captures the state of a single window. Returns true if the

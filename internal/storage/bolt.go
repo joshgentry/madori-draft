@@ -134,16 +134,42 @@ func tryAcquireLock(lockPath string) (*os.File, error) {
 }
 
 // SaveWindowMetrics stores window metrics for a display key.
-func (s *Store) SaveWindowMetrics(displayKey string, metrics map[uintptr][]*models.WindowMetrics) error {
+// It deletes any existing entries in the bucket that are not present in the
+// current metrics map, then writes the current entries. Returns the number
+// of stale entries that were cleaned up.
+func (s *Store) SaveWindowMetrics(displayKey string, metrics map[uintptr][]*models.WindowMetrics) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	return s.db.Update(func(tx *bolt.Tx) error {
+	var staleCount int
+	err := s.db.Update(func(tx *bolt.Tx) error {
 		bucket, err := tx.CreateBucketIfNotExists([]byte(displayKey))
 		if err != nil {
 			return err
 		}
 
+		// Build the set of keys that should exist after this save.
+		want := make(map[string]bool, len(metrics))
+		for hwnd := range metrics {
+			want[fmt.Sprintf("hwnd_%d", hwnd)] = true
+		}
+
+		// Collect stale keys (in bucket but not in metrics).
+		var staleKeys [][]byte
+		bucket.ForEach(func(k, _ []byte) error {
+			ks := string(k)
+			// Only consider hwnd_* keys; skip metadata keys if any exist.
+			if strings.HasPrefix(ks, "hwnd_") && !want[ks] {
+				staleKeys = append(staleKeys, k)
+			}
+			return nil
+		})
+		staleCount = len(staleKeys)
+		for _, k := range staleKeys {
+			bucket.Delete(k)
+		}
+
+		// Write current entries.
 		for hwnd, mList := range metrics {
 			key := []byte(fmt.Sprintf("hwnd_%d", hwnd))
 			data, err := json.Marshal(mList)
@@ -157,6 +183,7 @@ func (s *Store) SaveWindowMetrics(displayKey string, metrics map[uintptr][]*mode
 
 		return nil
 	})
+	return staleCount, err
 }
 
 // LoadWindowMetrics loads window metrics for a display key.
