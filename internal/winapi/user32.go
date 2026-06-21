@@ -380,6 +380,22 @@ func UpdateWindow(hWnd uintptr) bool {
 	return ret != 0
 }
 
+/*
+Undocumented, but "well-known in the Win32 community" API to determine if
+the window is a child of the Desktop, not a control of another window.
+
+Here's a Chromium-implemented variant:
+
+	bool IsTopLevelWindow(HWND window) {
+		LONG style = ::GetWindowLong(window, GWL_STYLE);
+		if (!(style & WS_CHILD))
+			return true;
+		HWND parent = ::GetParent(window);
+		return !parent || (parent == ::GetDesktopWindow());
+	}
+
+From: https://chromium.googlesource.com/chromium/src/+/299155e5e37a77670b7969771e09e9a16b1f5612/ui/views/win/hwnd_message_handler.cc#231
+*/
 func IsTopLevelWindow(hWnd uintptr) bool {
 	ret, _, _ := procIsTopLevelWindow.Call(hWnd)
 	return ret != 0
