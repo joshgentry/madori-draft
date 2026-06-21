@@ -76,23 +76,17 @@ func (p *Processor) RestoreApplicationsOnCurrentDisplays(displayKey string, targ
 		return
 	}
 
-	for hwnd, metricsList := range source {
+	for hwnd, metrics := range source {
 		if targetHwnd != 0 && hwnd != targetHwnd {
 			continue
 		}
-		if len(metricsList) == 0 {
+		if metrics == nil {
 			continue
 		}
 
 		// Skip windows that no longer exist or shouldn't be tracked
 		// (cloaked ghost frames, dead processes, etc.).
 		if !p.shouldTrackWindow(hwnd) {
-			continue
-		}
-
-		// Find the best metrics to restore
-		metrics := p.findBestRestoreMetrics(hwnd, metricsList, restoreTime)
-		if metrics == nil {
 			continue
 		}
 
@@ -110,32 +104,6 @@ func (p *Processor) RestoreApplicationsOnCurrentDisplays(displayKey string, targ
 			// restoreFiltered: no log — window was excluded from restore
 		}
 	}
-}
-
-func (p *Processor) findBestRestoreMetrics(hwnd uintptr, metricsList []*models.WindowMetrics, restoreTime time.Time) *models.WindowMetrics {
-	if len(metricsList) == 0 {
-		return nil
-	}
-
-	// If we have a snapshot, find the one matching the snapshot.
-	// Search newest-to-oldest so a fresh snapshot wins over a stale
-	// entry from a previous session that still carries the same bit.
-	if p.restoringSnapshot {
-		for i := len(metricsList) - 1; i >= 0; i-- {
-			if metricsList[i].HasSnapshotID(p.snapshotId) {
-				return metricsList[i]
-			}
-		}
-		// Fallback to last capture with any snapshot
-		for i := len(metricsList) - 1; i >= 0; i-- {
-			if metricsList[i].HasSnapshot() {
-				return metricsList[i]
-			}
-		}
-	}
-
-	// Default: use the last capture
-	return metricsList[len(metricsList)-1]
 }
 
 func doesWindowPositionMatch(hwnd uintptr, metrics *models.WindowMetrics) bool {
@@ -387,8 +355,8 @@ func (p *Processor) ActivateWindow(hwnd uintptr) {
 		return
 	}
 
-	metricsList, ok := p.monitorApplications[p.curDisplayKey][hwnd]
-	if !ok || len(metricsList) == 0 {
+	prevMetrics, ok := p.monitorApplications[p.curDisplayKey][hwnd]
+	if !ok || prevMetrics == nil {
 		// Window not tracked — only attempt off-screen fix
 		if p.EnableOffScreenFix && p.isOffScreen(hwnd) {
 			logger.AutoCapture(logger.LevelWarn, "off-screen fix", "%s (untracked)",
@@ -398,28 +366,14 @@ func (p *Processor) ActivateWindow(hwnd uintptr) {
 		return
 	}
 
-	// Get the most recent capture for this window.
-	prevMetrics := metricsList[len(metricsList)-1]
-
 	// Discard fast captures triggered by the unminimize event itself.
 	// A capture taken within 400ms of unminimize may reflect the
 	// window mid-animation or at a transient position.
 	diff := prevMetrics.CaptureTime.Sub(p.lastUnminimizeTime)
 	if diff > 0 && diff < 400*time.Millisecond {
-		metricsList = metricsList[:len(metricsList)-1]
-		p.monitorApplications[p.curDisplayKey][hwnd] = metricsList
-		if len(metricsList) == 0 {
+		if !prevMetrics.IsFullScreen {
 			return
 		}
-		newLast := metricsList[len(metricsList)-1]
-		if !newLast.IsFullScreen {
-			// The previous capture already had a valid normal
-			// position — no restore needed.
-			metricsList = append(metricsList, prevMetrics)
-			p.monitorApplications[p.curDisplayKey][hwnd] = metricsList
-			return
-		}
-		prevMetrics = newLast
 	}
 
 	// Only act if the previous capture shows the window was minimized.

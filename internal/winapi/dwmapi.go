@@ -7,9 +7,9 @@ import (
 )
 
 var (
-	modDwmapi                     = windows.NewLazySystemDLL("dwmapi.dll")
-	procDwmGetWindowAttribute     = modDwmapi.NewProc("DwmGetWindowAttribute")
-	procDwmSetWindowAttribute     = modDwmapi.NewProc("DwmSetWindowAttribute")
+	modDwmapi                 = windows.NewLazySystemDLL("dwmapi.dll")
+	procDwmGetWindowAttribute = modDwmapi.NewProc("DwmGetWindowAttribute")
+	procDwmSetWindowAttribute = modDwmapi.NewProc("DwmSetWindowAttribute")
 )
 
 // DwmGetWindowAttribute retrieves a DWM attribute for a window.

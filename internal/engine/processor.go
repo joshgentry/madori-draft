@@ -27,7 +27,7 @@ const (
 	MaxUserMoves           = 4  // max user window moves per capture cycle
 	MinWindowOsMoveEvents  = 12 // threshold of window move events by OS per cycle
 	MaxSnapshots           = 38 // 0-9, a-z, ` and final one for undo
-	MaxHistoryQueueLength  = 41 // ideally bigger than MaxSnapshots + 2
+	MaxUserSnapshotID      = 36 // 0-9 (10), a-z (26), ` (1) = 37 slots, index 0-36
 	MinClassNamePrefix     = 8  // allow partial class name matching
 
 	SyncCommandTimeoutMs        = 200
@@ -100,7 +100,6 @@ type featureFlags struct {
 	AutoRestoreLiveWindowsFromDb bool
 	enableDualPosSwitch          bool
 	EnableTrayParking            bool
-	resolveHwndCollision         bool
 	rejectScaleFactorChange      bool
 	captureFloatingWindow        bool
 }
@@ -140,8 +139,7 @@ type Processor struct {
 	sessionState
 
 	// In-memory databases
-	monitorApplications map[string]map[uintptr][]*models.WindowMetrics // live windows
-	deadApps            map[string]map[uintptr][]*models.WindowMetrics // killed windows
+	monitorApplications map[string]map[uintptr]*models.WindowMetrics // snap_auto
 
 	// Configuration
 	AppDataFolder string
@@ -180,11 +178,9 @@ type Processor struct {
 	UserForcedRestoreLatency int
 
 	// Snapshot tracking
-	snapshotTakenTime map[string]map[int]time.Time
-	snapshotId        int
-
-	// Fake HWND for collision resolution
-	fakeHwnd uint32
+	snapshotTakenTime  map[string]map[int]time.Time
+	snapshotId         int
+	snapshotAutoBackup map[uintptr]*models.WindowMetrics // auto-capture backup during snapshot restore
 
 	// Icon state
 	iconBusy bool
@@ -236,8 +232,7 @@ func New() *Processor {
 		},
 
 		// Top-level fields
-		monitorApplications:  make(map[string]map[uintptr][]*models.WindowMetrics),
-		deadApps:             make(map[string]map[uintptr][]*models.WindowMetrics),
+		monitorApplications:  make(map[string]map[uintptr]*models.WindowMetrics),
 		windowTitle:          make(map[uintptr]string),
 		windowTitleFast:      make(map[uintptr]string),
 		windowProcessName:    make(map[uintptr]string),
@@ -262,7 +257,6 @@ func New() *Processor {
 			CopyCornerPreference:         true,
 			enableDualPosSwitch:          true,
 			EnableTrayParking:            true,
-			resolveHwndCollision:         true,
 			captureFloatingWindow:        true,
 			rejectScaleFactorChange:      true,
 			AutoRestoreLiveWindowsFromDb: true,
@@ -614,8 +608,10 @@ func (p *Processor) onWindowHide(evt WindowEvent) {
 	if !p.isTrackedWindow(evt.HWnd) {
 		return
 	}
-	logger.WindowEvent(logger.LevelDebug, "window hide", "%s moving to dead", p.WindowDesc(evt.HWnd))
-	p.moveToDead(evt.HWnd)
+	logger.WindowEvent(logger.LevelDebug, "window hide", "%s", p.WindowDesc(evt.HWnd))
+	for dk := range p.monitorApplications {
+		delete(p.monitorApplications[dk], evt.HWnd)
+	}
 	p.startCaptureTimer(CaptureLatency)
 }
 
@@ -634,7 +630,9 @@ func (p *Processor) onWindowDestroy(evt WindowEvent) {
 		return
 	}
 	logger.WindowEvent(logger.LevelDebug, "window kill", "%s", p.WindowDesc(evt.HWnd))
-	p.moveToDead(evt.HWnd)
+	for dk := range p.monitorApplications {
+		delete(p.monitorApplications[dk], evt.HWnd)
+	}
 	p.startCaptureTimer(CaptureLatency)
 }
 
@@ -831,6 +829,10 @@ func (p *Processor) onRestoreFinishedTimer() {
 	}
 	p.iconBusy = false
 	p.sessionActive = true
+	if p.snapshotAutoBackup != nil {
+		p.monitorApplications[p.curDisplayKey] = p.snapshotAutoBackup
+		p.snapshotAutoBackup = nil
+	}
 }
 
 // isTrackedWindow returns true if the window exists in our capture database.
@@ -841,54 +843,6 @@ func (p *Processor) isTrackedWindow(hwnd uintptr) bool {
 		}
 	}
 	return false
-}
-
-func (p *Processor) moveToDead(hwnd uintptr) {
-	for displayKey, apps := range p.monitorApplications {
-		if metrics, ok := apps[hwnd]; ok {
-			if p.deadApps[displayKey] == nil {
-				p.deadApps[displayKey] = make(map[uintptr][]*models.WindowMetrics)
-			}
-			p.deadApps[displayKey][hwnd] = metrics
-			delete(apps, hwnd)
-		}
-	}
-	p.resolveHwndConflict(hwnd)
-}
-
-func (p *Processor) resolveHwndConflict(hwnd uintptr) {
-	if !p.resolveHwndCollision {
-		return
-	}
-	for displayKey, dead := range p.deadApps {
-		if _, ok := dead[hwnd]; !ok {
-			continue
-		}
-		fakeHwnd := uintptr((uint32(p.fakeHwnd) << 24) | uint32(hwnd))
-		if fakeHwnd == hwnd {
-			continue
-		}
-		if liveApps, ok := p.monitorApplications[displayKey]; ok {
-			for _, metricsList := range liveApps {
-				for _, m := range metricsList {
-					if m.PrevStackingWindow == hwnd {
-						m.PrevStackingWindow = fakeHwnd
-					}
-				}
-			}
-		}
-		dead[fakeHwnd] = dead[hwnd]
-		delete(dead, hwnd)
-		for _, metricsList := range dead {
-			for _, m := range metricsList {
-				if m.PrevStackingWindow == hwnd {
-					m.PrevStackingWindow = fakeHwnd
-				}
-			}
-		}
-		p.fakeHwnd++
-		return
-	}
 }
 
 // SetIgnoreProcess adds process names to ignore list.

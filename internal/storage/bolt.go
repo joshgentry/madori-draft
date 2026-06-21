@@ -133,17 +133,24 @@ func tryAcquireLock(lockPath string) (*os.File, error) {
 	return f, nil
 }
 
-// SaveWindowMetrics stores window metrics for a display key.
-// It deletes any existing entries in the bucket that are not present in the
-// current metrics map, then writes the current entries. Returns the number
-// of stale entries that were cleaned up.
-func (s *Store) SaveWindowMetrics(displayKey string, metrics map[uintptr][]*models.WindowMetrics) (int, error) {
+// SaveWindowMetrics stores window metrics into a sub-bucket identified by
+// snapshotKey within the displayKey bucket. It deletes any existing entries
+// in the sub-bucket that are not present in the metrics map, then writes
+// the current entries. Returns the number of stale entries cleaned up.
+//
+// Example: SaveWindowMetrics("dk_monitor1", "snap_auto", apps)
+// writes into bucket dk_monitor1 → sub-bucket snap_auto → hwnd_X = metrics.
+func (s *Store) SaveWindowMetrics(displayKey string, snapshotKey string, metrics map[uintptr]*models.WindowMetrics) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	var staleCount int
 	err := s.db.Update(func(tx *bolt.Tx) error {
-		bucket, err := tx.CreateBucketIfNotExists([]byte(displayKey))
+		parent, err := tx.CreateBucketIfNotExists([]byte(displayKey))
+		if err != nil {
+			return err
+		}
+		bucket, err := parent.CreateBucketIfNotExists([]byte(snapshotKey))
 		if err != nil {
 			return err
 		}
@@ -154,11 +161,10 @@ func (s *Store) SaveWindowMetrics(displayKey string, metrics map[uintptr][]*mode
 			want[fmt.Sprintf("hwnd_%d", hwnd)] = true
 		}
 
-		// Collect stale keys (in bucket but not in metrics).
+		// Collect stale keys (in sub-bucket but not in metrics).
 		var staleKeys [][]byte
 		bucket.ForEach(func(k, _ []byte) error {
 			ks := string(k)
-			// Only consider hwnd_* keys; skip metadata keys if any exist.
 			if strings.HasPrefix(ks, "hwnd_") && !want[ks] {
 				staleKeys = append(staleKeys, k)
 			}
@@ -170,9 +176,12 @@ func (s *Store) SaveWindowMetrics(displayKey string, metrics map[uintptr][]*mode
 		}
 
 		// Write current entries.
-		for hwnd, mList := range metrics {
+		for hwnd, m := range metrics {
+			if m == nil {
+				continue
+			}
 			key := []byte(fmt.Sprintf("hwnd_%d", hwnd))
-			data, err := json.Marshal(mList)
+			data, err := json.Marshal(m)
 			if err != nil {
 				return err
 			}
@@ -186,28 +195,36 @@ func (s *Store) SaveWindowMetrics(displayKey string, metrics map[uintptr][]*mode
 	return staleCount, err
 }
 
-// LoadWindowMetrics loads window metrics for a display key.
-func (s *Store) LoadWindowMetrics(displayKey string) (map[uintptr][]*models.WindowMetrics, error) {
+// LoadWindowMetrics loads window metrics from a sub-bucket identified by
+// snapshotKey within the displayKey bucket.
+//
+// Example: LoadWindowMetrics("dk_monitor1", "snap_auto")
+// reads bucket dk_monitor1 → sub-bucket snap_auto → hwnd_X = metrics.
+func (s *Store) LoadWindowMetrics(displayKey string, snapshotKey string) (map[uintptr]*models.WindowMetrics, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	result := make(map[uintptr][]*models.WindowMetrics)
+	result := make(map[uintptr]*models.WindowMetrics)
 
 	err := s.db.View(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket([]byte(displayKey))
+		parent := tx.Bucket([]byte(displayKey))
+		if parent == nil {
+			return nil
+		}
+		bucket := parent.Bucket([]byte(snapshotKey))
 		if bucket == nil {
-			return nil // no data for this key
+			return nil
 		}
 
 		return bucket.ForEach(func(k, v []byte) error {
 			var hwnd uintptr
 			fmt.Sscanf(string(k), "hwnd_%d", &hwnd)
 
-			var mList []*models.WindowMetrics
-			if err := json.Unmarshal(v, &mList); err != nil {
+			var m models.WindowMetrics
+			if err := json.Unmarshal(v, &m); err != nil {
 				return nil // skip corrupted entries
 			}
-			result[hwnd] = mList
+			result[hwnd] = &m
 			return nil
 		})
 	})
@@ -216,6 +233,20 @@ func (s *Store) LoadWindowMetrics(displayKey string) (map[uintptr][]*models.Wind
 		return nil, err
 	}
 	return result, nil
+}
+
+// DeleteSnapshotBucket deletes an entire snapshot sub-bucket under the
+// displayKey bucket. Safe to call on non-existent buckets (no-op).
+func (s *Store) DeleteSnapshotBucket(displayKey string, snapshotKey string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.db.Update(func(tx *bolt.Tx) error {
+		parent := tx.Bucket([]byte(displayKey))
+		if parent == nil {
+			return nil
+		}
+		return parent.DeleteBucket([]byte(snapshotKey))
+	})
 }
 
 // ListDisplayKeys returns all display configuration keys in the database.
@@ -329,7 +360,7 @@ func (s *Store) SaveDisplayKeyTimestamp(displayKey string, t time.Time) error {
 	})
 }
 
-// PruneDisplayKeys deletes live_<dk> and dead_<dk> buckets for display keys
+// PruneDisplayKeys deletes dk_<dk> buckets for display keys
 // that are not among the most recent maxKeep (oldest LRU eviction).
 // _snapshot_times entries for pruned keys are also removed.
 //
@@ -380,9 +411,8 @@ func (s *Store) PruneDisplayKeys(maxKeep int, preserve map[string]bool) error {
 		toPrune := candidates[:len(candidates)-maxKeep]
 
 		for _, e := range toPrune {
-			// Delete live_ and dead_ buckets
-			tx.DeleteBucket([]byte("live_" + e.key))
-			tx.DeleteBucket([]byte("dead_" + e.key))
+			// Delete the display-key bucket
+			tx.DeleteBucket([]byte("dk_" + e.key))
 			// Delete the meta entry itself
 			meta.Delete([]byte(e.key))
 		}

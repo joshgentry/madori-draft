@@ -38,18 +38,14 @@ type WindowMetrics struct {
 	NeedUpdateWindowPlacement bool                   `json:"-"` // transient
 
 	// Window stacking (z-order)
-	IsTopMost           bool    `json:"is_top_most"`
-	NeedClearTopMost    bool    `json:"need_clear_top_most"`
-	PrevStackingWindow  uintptr `json:"-"`             // transient, no longer used — replaced by StackingRank
-	NeedRestoreStacking bool    `json:"-"`             // transient — true when StackingRank is valid
-	StackingRank        int     `json:"stacking_rank"` // 0=topmost, -1=unset
+	IsTopMost           bool `json:"is_top_most"`
+	NeedClearTopMost    bool `json:"need_clear_top_most"`
+	NeedRestoreStacking bool `json:"need_restore_stacking"` // true when StackingRank is valid
+	StackingRank        int  `json:"stacking_rank"` // 0=topmost, -1=unset
 
 	// DWM corner preference (Windows 11+)
 	// 0=DWMWCP_DEFAULT, 1=DWMWCP_DONOTROUND, 2=DWMWCP_ROUND, 3=DWMWCP_ROUNDSMALL
 	WindowCornerPreference uint32 `json:"window_corner_preference"`
-
-	// Snapshot bitfield (up to 64 snapshot IDs)
-	SnapShotFlags uint64 `json:"snapshot_flags"`
 
 	// Validity flag
 	IsValid bool `json:"is_valid"`
@@ -62,19 +58,4 @@ func (m *WindowMetrics) EqualPlacement(other *WindowMetrics) bool {
 	minmaxStateEqual := m.WindowPlacement.ShowCmd == other.WindowPlacement.ShowCmd
 	isMinimizedEqual := m.IsMinimized == other.IsMinimized
 	return posEqual && screenEqual && minmaxStateEqual && isMinimizedEqual
-}
-
-// HasSnapshot returns true if any snapshot bit is set.
-func (m *WindowMetrics) HasSnapshot() bool {
-	return m.SnapShotFlags != 0
-}
-
-// HasSnapshotID returns true if the specified snapshot bit is set.
-func (m *WindowMetrics) HasSnapshotID(id int) bool {
-	return (m.SnapShotFlags & (1 << uint(id))) != 0
-}
-
-// SetSnapshotID sets the snapshot bit for the given ID.
-func (m *WindowMetrics) SetSnapshotID(id int) {
-	m.SnapShotFlags |= (1 << uint(id))
 }

@@ -5,15 +5,17 @@ import (
 	"time"
 
 	"madori/internal/logger"
+	"madori/internal/models"
 	"madori/internal/winapi"
 )
 
 // TakeSnapshot records the current window positions as a named snapshot.
-// The snapshot ID is 0-9 (number keys), 10-35 (letter keys a-z), 36 (`) or 37 (undo).
+// Valid snapshot IDs are 0-9 (number keys), 10-35 (a-z), and 36 (`).
+// ID 37 is reserved for the internal undo slot.
 func (p *Processor) TakeSnapshot(id int) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if id < 0 || id >= MaxSnapshots {
+	if id < 0 || id > MaxUserSnapshotID {
 		return false
 	}
 
@@ -31,34 +33,34 @@ func (p *Processor) TakeSnapshot(id int) bool {
 		p.callbacks.ShowSnapshotCaptureTip(id)
 	}
 
-	// Set snapshot flag on the last capture for each window
-	for hwnd, metricsList := range p.monitorApplications[displayKey] {
-		if len(metricsList) == 0 {
+	// Set snapshot bits for each window's latest capture
+	for hwnd, m := range p.monitorApplications[displayKey] {
+		if m == nil {
 			continue
 		}
 		if hwnd == p.foreGroundWindow {
 			// Take a fresh capture first
 			p.CaptureWindow(hwnd, 0, time.Now(), displayKey)
 		}
-		// Set snapshot bit
-		last := metricsList[len(metricsList)-1]
-		last.SetSnapshotID(id)
-
-		// Also save snapshot to undo slot
-		last.SetSnapshotID(MaxSnapshots + 1)
 	}
 
 	// Walk the full z-order chain and assign ranks so we can rebuild
 	// window stacking during restore.
 	p.CaptureStackingAll(displayKey)
 
-	// Save undo slot — set previous capture snapshot bit on the second-to-last entry
-	for _, metricsList := range p.monitorApplications[displayKey] {
-		if len(metricsList) >= 2 {
-			prev := metricsList[len(metricsList)-2]
-			prev.SetSnapshotID(MaxSnapshots + 1)
+	// Bulk-copy current state into the snapshot sub-bucket.
+	copies := make(map[uintptr]*models.WindowMetrics, len(p.monitorApplications[displayKey]))
+	for hwnd, m := range p.monitorApplications[displayKey] {
+		if m == nil {
+			continue
 		}
+		c := *m // value copy
+		copies[hwnd] = &c
 	}
+	p.store.SaveWindowMetrics("dk_"+displayKey, snapshotKey(id), copies)
+
+	// Also update the undo slot so "undo" goes back to this snapshot.
+	p.store.SaveWindowMetrics("dk_"+displayKey, snapKeyUndo, copies)
 
 	// Record snapshot time
 	if p.snapshotTakenTime[displayKey] == nil {
@@ -81,39 +83,107 @@ func (p *Processor) TakeSnapshot(id int) bool {
 
 // RestoreSnapshot restores windows to their positions at the time of the snapshot.
 func (p *Processor) RestoreSnapshot(id int) {
-	// Save current position as undo (TakeSnapshot handles its own locking)
-	p.TakeSnapshot(MaxSnapshots + 1)
-
+	// Save current auto-capture state as undo snapshot before replacing it.
+	// We do this under our own lock, not via TakeSnapshot (which validates IDs).
 	p.mu.Lock()
-	defer p.mu.Unlock()
+	displayKey := p.curDisplayKey
+	copies := make(map[uintptr]*models.WindowMetrics, len(p.monitorApplications[displayKey]))
+	for hwnd, m := range p.monitorApplications[displayKey] {
+		if m == nil {
+			continue
+		}
+		c := *m
+		copies[hwnd] = &c
+	}
+	if p.store != nil {
+		p.store.SaveWindowMetrics("dk_"+displayKey, snapKeyUndo, copies)
+	}
+
+	// Load the requested snapshot into memory, backing up current auto-capture.
+	snapshotEntries, err := p.store.LoadWindowMetrics("dk_"+displayKey, snapshotKey(id))
+	if err != nil || len(snapshotEntries) == 0 {
+		p.mu.Unlock()
+		logger.Error(logger.LevelError, "", "Snapshot %d not found", id)
+		return
+	}
+	p.snapshotAutoBackup = p.monitorApplications[displayKey]
+	p.monitorApplications[displayKey] = snapshotEntries
 
 	p.restoringSnapshot = true
 	p.snapshotId = id
 	p.restoringFromMem = true
-
 	p.restoreTimes = 0
 	p.restoredWindows = make(map[uintptr]bool)
-	logger.Snapshot(logger.LevelInfo, "snapshot restore", "snapshot %d", id)
+	logger.Snapshot(logger.LevelInfo, "snapshot restore", "snapshot %d (%d windows)", id, len(snapshotEntries))
+	p.mu.Unlock()
+
 	p.BatchRestoreApplicationsOnCurrentDisplays()
 }
 
-// snapshotKey returns the BoltDB bucket key for a one-shot snapshot.
-// These are separate from the live_<displayKey> keys used by tray-mode
-// auto-capture, so one-shot commands never mix with auto-capture data.
+// Snapshot sub-bucket key constants.
+const (
+	snapKeyAuto = "snap_auto"
+	snapKeyUndo = "snap_undo"
+)
+
+// snapshotKey returns the snapshot sub-bucket key for a numeric snapshot ID.
 func snapshotKey(id int) string {
 	return "snap_" + strconv.Itoa(id)
 }
 
-// RestoreSnapshotCmd is the CLI one-shot: loads only snapshot data from
-// the snap_<id> key (not live auto-capture data), restores windows, and exits.
+// ParseSnapshotID converts a key character to its snapshot ID.
+// "0"-"9" → 0-9, "a"-"z" or "A"-"Z" → 10-35, "`" or "~" → 36.
+// Returns -1 for unrecognized input.
+func ParseSnapshotID(s string) int {
+	if len(s) != 1 {
+		return -1
+	}
+	c := s[0]
+	if c == '`' || c == '~' {
+		return 36
+	}
+	if c >= '0' && c <= '9' {
+		return int(c - '0')
+	}
+	if c >= 'a' && c <= 'z' {
+		return int(c - 'a' + 10)
+	}
+	if c >= 'A' && c <= 'Z' {
+		return int(c - 'A' + 10)
+	}
+	return -1
+}
+
+// SnapshotName returns the display character for a snapshot ID.
+func SnapshotName(id int) string {
+	switch {
+	case id >= 0 && id <= 9:
+		return string(rune('0' + id))
+	case id >= 10 && id <= 35:
+		return string(rune('a' + id - 10))
+	case id == 36:
+		return "`"
+	default:
+		return "?"
+	}
+}
+
+// RestoreSnapshotCmd is the CLI one-shot: loads the snapshot from
+// dk_<dk>/snap_<id>, restores windows, and exits.
 func (p *Processor) RestoreSnapshotCmd(id int) {
-	metrics, err := p.store.LoadWindowMetrics(snapshotKey(id))
-	if err != nil || len(metrics) == 0 {
-		logger.Error(logger.LevelError, "", "Snapshot %d not found", id)
+	if id < 0 || id > MaxUserSnapshotID {
+		logger.Error(logger.LevelError, "", "Snapshot %d: valid IDs are 0-%d", id, MaxUserSnapshotID)
 		return
 	}
 
-	p.curDisplayKey = winapi.GetDisplayKey()
+	displayKey := winapi.GetDisplayKey()
+	metrics, err := p.store.LoadWindowMetrics("dk_"+displayKey, snapshotKey(id))
+	if err != nil || len(metrics) == 0 {
+		logger.Error(logger.LevelError, "", "Snapshot %d not found for display config %s", id, displayKey)
+		return
+	}
+
+	p.curDisplayKey = displayKey
 	p.CaptureNewDisplayConfig(p.curDisplayKey)
 	p.monitorApplications[p.curDisplayKey] = metrics
 
@@ -125,13 +195,19 @@ func (p *Processor) RestoreSnapshotCmd(id int) {
 }
 
 // CaptureSnapshotCmd is the CLI one-shot: enumerates current windows,
-// saves them under the snap_<id> key (not live auto-capture data), and exits.
+// saves them under dk_<dk>/snap_<id>, and exits.
 func (p *Processor) CaptureSnapshotCmd(id int) {
-	p.curDisplayKey = winapi.GetDisplayKey()
+	if id < 0 || id > MaxUserSnapshotID {
+		logger.Error(logger.LevelError, "", "Snapshot %d: valid IDs are 0-%d", id, MaxUserSnapshotID)
+		return
+	}
+
+	displayKey := winapi.GetDisplayKey()
+	p.curDisplayKey = displayKey
 	p.CaptureNewDisplayConfig(p.curDisplayKey)
 	p.CaptureWindowsOfInterest(p.curDisplayKey)
 
-	p.store.SaveWindowMetrics(snapshotKey(id), p.monitorApplications[p.curDisplayKey])
+	p.store.SaveWindowMetrics("dk_"+displayKey, snapshotKey(id), p.monitorApplications[p.curDisplayKey])
 	logger.Snapshot(logger.LevelInfo, "snapshot captured", "snapshot %d (%d windows)", id,
 		len(p.monitorApplications[p.curDisplayKey]))
 }

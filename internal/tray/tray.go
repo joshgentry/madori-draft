@@ -362,26 +362,11 @@ func (t *TrayApp) startNotificationTimer() {
 	}
 }
 
-// snapshotName returns the display character for a snapshot ID.
-// IDs 0-9 → "0"..."9", 10-35 → "a"..."z", 36 → "`", 37 → "undo".
-func snapshotName(id int) string {
-	switch {
-	case id >= 0 && id <= 9:
-		return string(rune('0' + id))
-	case id >= 10 && id <= 35:
-		return string(rune('a' + id - 10))
-	case id == 36:
-		return "`"
-	default:
-		return "?"
-	}
-}
-
 func (t *TrayApp) ShowSnapshotCaptureTip(id int) {
 	if t.silent || !t.notification {
 		return
 	}
-	t.showNotificationBalloon("Madori", "Window layout snapshot "+snapshotName(id)+" captured...")
+	t.showNotificationBalloon("Madori", "Window layout snapshot "+engine.SnapshotName(id)+" captured...")
 }
 
 func (t *TrayApp) ShowSnapshotRestoreTip(id int) {
@@ -389,7 +374,7 @@ func (t *TrayApp) ShowSnapshotRestoreTip(id int) {
 		return
 	}
 	t.iconBusy = true
-	t.showNotificationBalloon("Madori", "Window layout snapshot "+snapshotName(id)+" restored...")
+	t.showNotificationBalloon("Madori", "Window layout snapshot "+engine.SnapshotName(id)+" restored...")
 }
 
 func (t *TrayApp) EnableRestoreMenu(enableDB bool)       {}
@@ -560,7 +545,7 @@ func onMenuCommand(cmdID uint32) {
 	case CmdCaptureSnapshot:
 		name := EnterSnapshotName()
 		if name != 0 {
-			id := snapshotCharToID(name)
+			id := engine.ParseSnapshotID(string(name))
 			if id >= 0 {
 				logger.Snapshot(logger.LevelInfo, "snapshot captured", "snapshot %d via menu", id)
 				t.processor.TakeSnapshot(id)
@@ -569,7 +554,7 @@ func onMenuCommand(cmdID uint32) {
 	case CmdRestoreSnapshot:
 		name := EnterSnapshotName()
 		if name != 0 {
-			id := snapshotCharToID(name)
+			id := engine.ParseSnapshotID(string(name))
 			if id >= 0 {
 				logger.Snapshot(logger.LevelInfo, "snapshot restored", "snapshot %d via menu", id)
 				t.processor.RestoreSnapshot(id)
@@ -584,22 +569,6 @@ func onMenuCommand(cmdID uint32) {
 	case CmdExit:
 		t.Quit()
 	}
-}
-
-func snapshotCharToID(c byte) int {
-	if c == '`' || c == '~' {
-		return 36
-	}
-	if c >= '0' && c <= '9' {
-		return int(c - '0')
-	}
-	if c >= 'a' && c <= 'z' {
-		return int(c - 'a' + 10)
-	}
-	if c >= 'A' && c <= 'Z' {
-		return int(c - 'A' + 10)
-	}
-	return -1
 }
 
 func onSessionChange(reason uint32) {

@@ -25,10 +25,7 @@ func (p *Processor) BatchCaptureApplicationsOnCurrentDisplays() {
 // CaptureNewDisplayConfig ensures the display key exists in our databases.
 func (p *Processor) CaptureNewDisplayConfig(displayKey string) {
 	if _, ok := p.monitorApplications[displayKey]; !ok {
-		p.monitorApplications[displayKey] = make(map[uintptr][]*models.WindowMetrics)
-	}
-	if _, ok := p.deadApps[displayKey]; !ok {
-		p.deadApps[displayKey] = make(map[uintptr][]*models.WindowMetrics)
+		p.monitorApplications[displayKey] = make(map[uintptr]*models.WindowMetrics)
 	}
 }
 
@@ -51,29 +48,19 @@ func (p *Processor) CaptureWindowsOfInterest(displayKey string) {
 
 	// Prune stale entries from the map — HWNDs that were loaded from DB
 	// (prior sessions) or previously captured but no longer exist in the
-	// current enumeration. Entries with snapshot data are preserved so
-	// snapshot-based restores continue to work.
+	// current enumeration. Snapshots are stored in separate DB sub-buckets
+	// so there are no snapshot bits to preserve.
 	pruned := 0
-	for hwnd, metricsList := range p.monitorApplications[displayKey] {
+	for hwnd := range p.monitorApplications[displayKey] {
 		if seen[hwnd] {
-			continue
-		}
-		hasSnapshot := false
-		for _, m := range metricsList {
-			if m.HasSnapshot() {
-				hasSnapshot = true
-				break
-			}
-		}
-		if hasSnapshot {
 			continue
 		}
 		delete(p.monitorApplications[displayKey], hwnd)
 		pruned++
 	}
 	if pruned > 0 {
-		logger.AutoCapture(logger.LevelDebug, "", "Pruned %d stale entries from %s (preserved %d with snapshots)",
-			pruned, displayKey, len(p.monitorApplications[displayKey]))
+		logger.AutoCapture(logger.LevelDebug, "", "Pruned %d stale entries from %s",
+			pruned, displayKey)
 	}
 }
 
@@ -92,10 +79,8 @@ func (p *Processor) CaptureWindow(hwnd uintptr, eventType uint32, captureTime ti
 
 	metrics.CaptureTime = captureTime
 
-	// Append to monitor applications
-	p.monitorApplications[displayKey][hwnd] = append(
-		p.monitorApplications[displayKey][hwnd], metrics,
-	)
+	// Store latest capture
+	p.monitorApplications[displayKey][hwnd] = metrics
 
 	minimized := ""
 	if metrics.IsMinimized {
@@ -121,12 +106,6 @@ func (p *Processor) CaptureWindow(hwnd uintptr, eventType uint32, captureTime ti
 		cloakedStr, minimized,
 		metrics.ScreenPosition.Left, metrics.ScreenPosition.Top,
 		metrics.ScreenPosition.Width(), metrics.ScreenPosition.Height())
-
-	// Keep history bounded
-	if len(p.monitorApplications[displayKey][hwnd]) > MaxHistoryQueueLength {
-		p.monitorApplications[displayKey][hwnd] =
-			p.monitorApplications[displayKey][hwnd][len(p.monitorApplications[displayKey][hwnd])-MaxHistoryQueueLength:]
-	}
 	return true
 }
 
@@ -201,10 +180,9 @@ func (p *Processor) captureWindowCore(hwnd uintptr, displayKey string) *models.W
 	}
 
 	// Compare with previous capture — skip if position hasn't changed
-	if existing, ok := p.monitorApplications[displayKey][hwnd]; ok && len(existing) > 0 {
-		last := existing[len(existing)-1]
-		if last.EqualPlacement(m) {
-			last.CaptureTime = time.Now()
+	if existing, ok := p.monitorApplications[displayKey][hwnd]; ok && existing != nil {
+		if existing.EqualPlacement(m) {
+			existing.CaptureTime = time.Now()
 			return nil
 		}
 	}

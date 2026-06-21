@@ -26,23 +26,14 @@ func (p *Processor) RestoreStacking(displayKey string) {
 		rank int
 	}
 	var windows []entry
-	for hwnd, metricsList := range apps {
-		if len(metricsList) == 0 {
-			continue
-		}
-		// During snapshot restore, find the metrics tagged with the snapshot
-		// ID — same logic as findBestRestoreMetrics. Otherwise use the last
-		// entry. This is critical: foreground changes trigger auto-captures
-		// that append entries without StackingRank, which would shadow the
-		// snapshot entry if we always used the last.
-		m := p.findStackingMetrics(metricsList)
-		// NeedRestoreStacking is a one-shot flag cleared after the first
-		// restore. During snapshot restore the snapshot bit on the entry
-		// is signal enough — don't gate on the consumed flag.
+	for hwnd, m := range apps {
 		if m == nil {
 			continue
 		}
-		if !p.restoringSnapshot && !m.NeedRestoreStacking && p.FixStacking != 2 {
+		// NeedRestoreStacking is a one-shot flag set by CaptureStackingAll.
+		// During snapshot restore, the loaded snapshot entries already have
+		// NeedRestoreStacking=true from when the snapshot was taken.
+		if !m.NeedRestoreStacking && p.FixStacking != 2 {
 			continue
 		}
 		windows = append(windows, entry{hwnd, m.StackingRank})
@@ -144,10 +135,9 @@ func (p *Processor) CaptureStackingAll(displayKey string) {
 	rank := 0
 	assigned := 0
 	for hwnd != 0 {
-		if mList, ok := apps[hwnd]; ok && len(mList) > 0 {
-			last := mList[len(mList)-1]
-			last.StackingRank = rank
-			last.NeedRestoreStacking = true
+		if m, ok := apps[hwnd]; ok && m != nil {
+			m.StackingRank = rank
+			m.NeedRestoreStacking = true
 			rank++
 			assigned++
 		}
@@ -156,33 +146,9 @@ func (p *Processor) CaptureStackingAll(displayKey string) {
 	logger.WindowEvent(logger.LevelDebug, "stacking capture all", "assigned ranks 0-%d to %d tracked windows (displayKey=%s)", rank-1, assigned, displayKey)
 }
 
-// findStackingMetrics returns the metrics entry to use for stacking restore.
-// During snapshot restore it searches for the snapshot-tagged entry (same
-// logic as findBestRestoreMetrics); otherwise it returns the last entry.
-func (p *Processor) findStackingMetrics(metricsList []*models.WindowMetrics) *models.WindowMetrics {
-	if len(metricsList) == 0 {
-		return nil
-	}
-	if p.restoringSnapshot {
-		for i := len(metricsList) - 1; i >= 0; i-- {
-			if metricsList[i].HasSnapshotID(p.snapshotId) {
-				return metricsList[i]
-			}
-		}
-		// Fallback to any snapshot
-		for i := len(metricsList) - 1; i >= 0; i-- {
-			if metricsList[i].HasSnapshot() {
-				return metricsList[i]
-			}
-		}
-	}
-	return metricsList[len(metricsList)-1]
-}
-
 // --- Disk persistence ---
 
-// PersistToDB saves the full engine state (live windows, dead windows, snapshot times)
-// to BoltDB so it survives crashes and reboots.
+// PersistToDB saves the full engine state to BoltDB so it survives crashes and reboots.
 func (p *Processor) PersistToDB() {
 	if p.store == nil {
 		return
@@ -194,12 +160,7 @@ func (p *Processor) PersistToDB() {
 	logger.AutoCapture(logger.LevelInfo, "", "Auto-saving %d windows to database", total)
 	dbPruned := 0
 	for dk, apps := range p.monitorApplications {
-		n, _ := p.store.SaveWindowMetrics("live_"+dk, apps)
-		dbPruned += n
-		p.store.SaveDisplayKeyTimestamp(dk, time.Now())
-	}
-	for dk, dead := range p.deadApps {
-		n, _ := p.store.SaveWindowMetrics("dead_"+dk, dead)
+		n, _ := p.store.SaveWindowMetrics("dk_"+dk, snapKeyAuto, apps)
 		dbPruned += n
 		p.store.SaveDisplayKeyTimestamp(dk, time.Now())
 	}
@@ -216,20 +177,15 @@ func (p *Processor) LoadFromDB() {
 	}
 	keys, _ := p.store.ListDisplayKeys()
 	for _, dk := range keys {
-		if len(dk) > 5 && dk[:5] == "live_" {
-			realKey := dk[5:]
-			if metrics, err := p.store.LoadWindowMetrics(dk); err == nil && metrics != nil {
+		if len(dk) > 3 && dk[:3] == "dk_" {
+			realKey := dk[3:]
+			if metrics, err := p.store.LoadWindowMetrics(dk, snapKeyAuto); err == nil && metrics != nil {
 				if p.monitorApplications[realKey] == nil {
-					p.monitorApplications[realKey] = make(map[uintptr][]*models.WindowMetrics)
+					p.monitorApplications[realKey] = make(map[uintptr]*models.WindowMetrics)
 				}
-				for hwnd, mList := range metrics {
-					p.monitorApplications[realKey][hwnd] = mList
+				for hwnd, m := range metrics {
+					p.monitorApplications[realKey][hwnd] = m
 				}
-			}
-		} else if len(dk) > 5 && dk[:5] == "dead_" {
-			realKey := dk[5:]
-			if metrics, err := p.store.LoadWindowMetrics(dk); err == nil && metrics != nil {
-				p.deadApps[realKey] = metrics
 			}
 		}
 	}
@@ -243,7 +199,7 @@ func (p *Processor) LoadFromDB() {
 	// (dock/undock, resolution changes) persists forever.
 	//
 	// Display keys with snapshot data are preserved — pruning them would silently
-	// destroy the snapshot (the metrics with snapshot bits live in live_<dk>).
+	// destroy the snapshot.
 	snapshotDKs := make(map[string]bool, len(p.snapshotTakenTime))
 	for dk := range p.snapshotTakenTime {
 		snapshotDKs[dk] = true

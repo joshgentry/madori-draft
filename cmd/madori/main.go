@@ -37,8 +37,8 @@ var (
 	enhancedOffscreenFix       bool
 	fixMinimizedRestore        bool
 	disableCornerCopy          bool
-	restoreSnapshot            int
-	captureSnapshot            int
+	restoreSnapshot            string
+	captureSnapshot            string
 	restoreParkedWindows       bool
 	portableMode               bool
 	redirectAppdata            string
@@ -178,8 +178,8 @@ func parseFlags() {
 	flag.BoolVar(&offscreenFix, "disable_offscreen_fix", false, "Disable off-screen window fix")
 	flag.BoolVar(&enhancedOffscreenFix, "enhanced_offscreen_fix", false, "Enhanced off-screen fix")
 	flag.BoolVar(&fixMinimizedRestore, "fix_minimized_restore", true, "Restore unminimized window position after display change")
-	flag.IntVar(&restoreSnapshot, "restore_snapshot", -1, "Restore snapshot by ID")
-	flag.IntVar(&captureSnapshot, "capture_snapshot", -1, "Capture snapshot by ID")
+	flag.StringVar(&restoreSnapshot, "restore_snapshot", "", "Restore snapshot by key (0-9, a-z, `)")
+	flag.StringVar(&captureSnapshot, "capture_snapshot", "", "Capture snapshot by key (0-9, a-z, `)")
 	flag.BoolVar(&restoreParkedWindows, "restore_parked_windows", false, "Restore all parked windows from database and exit")
 	flag.BoolVar(&portableMode, "portable_mode", false, "Portable mode (data in user_data/)")
 	flag.StringVar(&redirectAppdata, "redirect_appdata", "", "Override app data directory")
@@ -221,12 +221,18 @@ func resolveAppDataFolder() string {
 }
 
 func handleOneShotCommands(proc *engine.Processor) bool {
-	if restoreSnapshot >= 0 {
-		proc.RestoreSnapshotCmd(restoreSnapshot)
+	if restoreSnapshot != "" {
+		id := engine.ParseSnapshotID(restoreSnapshot)
+		if id >= 0 {
+			proc.RestoreSnapshotCmd(id)
+		}
 		return true
 	}
-	if captureSnapshot >= 0 {
-		proc.CaptureSnapshotCmd(captureSnapshot)
+	if captureSnapshot != "" {
+		id := engine.ParseSnapshotID(captureSnapshot)
+		if id >= 0 {
+			proc.CaptureSnapshotCmd(id)
+		}
 		return true
 	}
 	if restoreParkedWindows {

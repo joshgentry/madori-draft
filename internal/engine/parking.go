@@ -178,8 +178,8 @@ func (p *Processor) RestoreParkedWindow(hwnd uintptr) {
 	delete(p.trayParkedWindows, hwnd)
 	p.persistParkedWindows()
 
-	if metricsList, ok := p.monitorApplications[p.curDisplayKey][hwnd]; ok && len(metricsList) > 0 {
-		p.restoreSingleWindow(hwnd, metricsList[len(metricsList)-1])
+	if metrics, ok := p.monitorApplications[p.curDisplayKey][hwnd]; ok && metrics != nil {
+		p.restoreSingleWindow(hwnd, metrics)
 	}
 
 	logger.Parking(logger.LevelDebug, "unparked window", "%s", p.WindowDesc(hwnd))
