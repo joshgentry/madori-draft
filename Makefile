@@ -1,4 +1,4 @@
-.PHONY: build build-release build-verify clean test vet tidy syso
+.PHONY: build build-release build-verify clean test vet tidy syso prebuild
 
 APP_NAME = madori
 VERSION = 1.0.0
@@ -8,8 +8,12 @@ SYSO_OUT = cmd/madori
 GO_WINRES = go tool go-winres
 ICON_FILE = resources/pwIcon.ico
 
+# Format Go source files (simplify + normalize spacing)
+prebuild:
+	gofmt -w -s .
+
 # Default: build Windows .exe with console (useful for debugging)
-build: syso
+build: prebuild syso
 	GOOS=windows GOARCH=amd64 go build \
 		-ldflags="-X main.version=$(VERSION)" \
 		-o $(BUILD_DIR)/$(APP_NAME).exe \
@@ -17,12 +21,11 @@ build: syso
 
 # Quick compile check — builds to build/ then removes the binary.
 # Succeeds only if compilation and link complete without errors.
-build-verify:
-	gofmt -w -s .
+build-verify: prebuild
 	GOOS=windows GOARCH=amd64 go build -o $(BUILD_DIR)/$(APP_NAME)-test-build.exe ./cmd/madori/ && rm $(BUILD_DIR)/$(APP_NAME)-test-build.exe && echo "Build OK"
 
 # Release: build Windows .exe without console window (gui subsystem)
-build-release: syso
+build-release: prebuild syso
 	GOOS=windows GOARCH=amd64 go build \
 		-ldflags="-H windowsgui -X main.version=$(VERSION)" \
 		-o $(BUILD_DIR)/$(APP_NAME).exe \
