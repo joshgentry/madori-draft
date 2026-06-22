@@ -30,13 +30,20 @@ func (p *Processor) RestoreStacking(displayKey string) {
 		if m == nil {
 			continue
 		}
-		// NeedRestoreStacking is a one-shot flag set by CaptureStackingAll.
 		// During snapshot restore, the loaded snapshot entries already have
-		// NeedRestoreStacking=true from when the snapshot was taken.
-		if !m.NeedRestoreStacking && p.FixStacking != 2 {
+		// NeedRestoreStacking=true from when the snapshot was taken — don't
+		// gate on it. Otherwise, NeedRestoreStacking is a one-shot flag set
+		// by CaptureStackingAll that must be consumed here so it doesn't
+		// leak into auto-capture persistence.
+		hasRank := m.NeedRestoreStacking || p.restoringSnapshot
+		if !hasRank && p.FixStacking != 2 {
 			continue
 		}
 		windows = append(windows, entry{hwnd, m.StackingRank})
+		// Clear the flag and rank now that we've read them, so they don't
+		// survive through PersistToDB into future auto-restore cycles.
+		m.NeedRestoreStacking = false
+		m.StackingRank = -1
 	}
 	if len(windows) == 0 {
 		logger.WindowEvent(logger.LevelDebug, "stacking restore", "skipped: no windows with NeedRestoreStacking (FixStacking=%d)", p.FixStacking)
@@ -44,7 +51,9 @@ func (p *Processor) RestoreStacking(displayKey string) {
 	}
 
 	// Sort by StackingRank ascending — topmost (rank 0) first.
-	sort.Slice(windows, func(i, j int) bool { return windows[i].rank < windows[j].rank })
+	// Use stable sort so duplicate ranks (from stale data or edge cases)
+	// produce deterministic ordering rather than depending on map iteration.
+	sort.SliceStable(windows, func(i, j int) bool { return windows[i].rank < windows[j].rank })
 
 	// Prune dead HWNDs and check whether the stacking is already correct.
 	// Untracked system windows sit between our tracked windows in the

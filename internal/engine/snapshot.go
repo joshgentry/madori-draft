@@ -188,6 +188,8 @@ func (p *Processor) RestoreSnapshotCmd(id int) {
 	p.monitorApplications[p.curDisplayKey] = metrics
 
 	p.restoringFromMem = true
+	p.restoringSnapshot = true
+	p.snapshotId = id
 	p.restoreTimes = 0
 	p.restoredWindows = make(map[uintptr]bool)
 	logger.Snapshot(logger.LevelInfo, "snapshot restore", "snapshot %d (%d windows)", id, len(metrics))
