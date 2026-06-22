@@ -22,14 +22,25 @@ func (p *Processor) RestoreStacking(displayKey string) {
 
 	// Collect windows that need z-order restore, with their captured rank.
 	type entry struct {
-		hwnd uintptr
-		rank int
+		hwnd        uintptr
+		rank        int
+		onCurrentVD bool
 	}
 	var windows []entry
+	includedCurrent := 0
+	includedOther := 0
+	skippedNoRank := 0
+	skippedDead := 0
 	for hwnd, m := range apps {
 		if m == nil {
 			continue
 		}
+		if !winapi.IsWindow(hwnd) {
+			skippedDead++
+			continue
+		}
+		onCurrent := p.vdManager == nil || !p.vdManager.Enabled() || p.vdManager.IsWindowOnCurrentVirtualDesktop(hwnd)
+
 		// During snapshot restore, the loaded snapshot entries already have
 		// NeedRestoreStacking=true from when the snapshot was taken — don't
 		// gate on it. Otherwise, NeedRestoreStacking is a one-shot flag set
@@ -37,41 +48,35 @@ func (p *Processor) RestoreStacking(displayKey string) {
 		// leak into auto-capture persistence.
 		hasRank := m.NeedRestoreStacking || p.restoringSnapshot
 		if !hasRank && p.FixStacking != 2 {
+			skippedNoRank++
 			continue
 		}
-		windows = append(windows, entry{hwnd, m.StackingRank})
+		windows = append(windows, entry{hwnd, m.StackingRank, onCurrent})
+		if onCurrent {
+			includedCurrent++
+		} else {
+			includedOther++
+		}
 		// Clear the flag and rank now that we've read them, so they don't
 		// survive through PersistToDB into future auto-restore cycles.
 		m.NeedRestoreStacking = false
 		m.StackingRank = -1
 	}
 	if len(windows) == 0 {
-		logger.WindowEvent(logger.LevelDebug, "stacking restore", "skipped: no windows with NeedRestoreStacking (FixStacking=%d)", p.FixStacking)
+		logger.WindowEvent(logger.LevelDebug, "stacking restore",
+			"skipped: no windows to restack (included=0, skippedNoRank=%d, skippedDead=%d, FixStacking=%d)",
+			skippedNoRank, skippedDead, p.FixStacking)
 		return
 	}
+
+	logger.WindowEvent(logger.LevelInfo, "stacking restore",
+		"collected %d windows (curVD=%d otherVD=%d, skippedNoRank=%d skippedDead=%d, snapshot=%v)",
+		len(windows), includedCurrent, includedOther, skippedNoRank, skippedDead, p.restoringSnapshot)
 
 	// Sort by StackingRank ascending — topmost (rank 0) first.
 	// Use stable sort so duplicate ranks (from stale data or edge cases)
 	// produce deterministic ordering rather than depending on map iteration.
 	sort.SliceStable(windows, func(i, j int) bool { return windows[i].rank < windows[j].rank })
-
-	// Prune dead HWNDs and check whether the stacking is already correct.
-	// Untracked system windows sit between our tracked windows in the
-	// z-order chain, so we can't compare HWND predecessors directly —
-	// instead walk the current chain and check relative ordering of
-	// tracked windows.
-	{
-		alive := windows[:0]
-		for _, w := range windows {
-			if winapi.IsWindow(w.hwnd) && winapi.IsWindowVisible(w.hwnd) {
-				alive = append(alive, w)
-			}
-		}
-		windows = alive
-	}
-	if len(windows) == 0 {
-		return
-	}
 
 	rankSet := make(map[uintptr]int, len(windows))
 	for _, w := range windows {
@@ -100,47 +105,64 @@ func (p *Processor) RestoreStacking(displayKey string) {
 		return
 	}
 
-	logger.WindowEvent(logger.LevelInfo, "stacking restore", "rebuilding stacking for %d windows (FixStacking=%d)", len(windows), p.FixStacking)
-	hDWP := winapi.BeginDeferWindowPos(int32(len(windows)))
-	if hDWP == 0 {
-		logger.Error(logger.LevelError, "", "BeginDeferWindowPos failed for %d windows", len(windows))
-		return
-	}
+	logger.WindowEvent(logger.LevelInfo, "stacking restore", "rebuilding stacking for %d windows (curVD=%d otherVD=%d, FixStacking=%d)",
+		len(windows), includedCurrent, includedOther, p.FixStacking)
+
+	// Use individual SetWindowPos calls rather than DeferWindowPos /
+	// EndDeferWindowPos.  The batch API silently ignores z-order changes
+	// for cloaked (other-VD) windows and, worse, leaves subsequent
+	// hWndInsertAfter targets dangling — current-VD windows whose
+	// insertAfter points to a cloaked window land in the wrong position.
+	// Individual SetWindowPos applies each change immediately, so every
+	// insertAfter target has already been positioned.
 	deferred := 0
 	var prevHWND uintptr
 	for _, w := range windows {
-		prevDWP := hDWP
-		hDWP = winapi.DeferWindowPos(hDWP, w.hwnd, prevHWND,
-			0, 0, 0, 0,
-			winapi.SWP_NOMOVE|winapi.SWP_NOSIZE|winapi.SWP_NOACTIVATE)
-		if hDWP == 0 {
-			logger.Error(logger.LevelError, "", "DeferWindowPos failed for %s", p.WindowDesc(w.hwnd))
-			winapi.EndDeferWindowPos(prevDWP)
-			return
+		if !winapi.SetWindowPos(w.hwnd, prevHWND, 0, 0, 0, 0,
+			winapi.SWP_NOMOVE|winapi.SWP_NOSIZE|winapi.SWP_NOACTIVATE) {
+			logger.Error(logger.LevelError, "", "SetWindowPos failed for %s (rank=%d, curVD=%v)",
+				p.WindowDesc(w.hwnd), w.rank, w.onCurrentVD)
 		}
 		prevHWND = w.hwnd
 		deferred++
 	}
-	if !winapi.EndDeferWindowPos(hDWP) {
-		logger.Error(logger.LevelError, "", "EndDeferWindowPos failed")
-		return
-	}
 	logger.WindowEvent(logger.LevelInfo, "stacking restore", "placed %d windows", deferred)
 }
 
-// CaptureStackingAll walks the full stacking chain from top to bottom and
-// assigns each tracked window a StackingRank (0 = topmost, 1 = next, …).
-// Call this once per snapshot to capture the absolute stacking position
-// of every window.
+// CaptureStackingAll walks the global z-order chain from top to bottom and
+// assigns each tracked window a StackingRank (0 = global topmost, …).
+// The chain includes windows from all virtual desktops — current-desktop
+// windows appear first, then other-desktop windows grouped by desktop.
+// Ranks are global but RestoreStacking filters to the current desktop, so
+// per-desktop relative ordering is preserved.
 func (p *Processor) CaptureStackingAll(displayKey string) {
 	apps, ok := p.monitorApplications[displayKey]
 	if !ok || len(apps) == 0 {
 		return
 	}
 
-	// Walk the z-order chain from the topmost window down.
-	// GetTopWindow(0) = topmost; GetWindow(h, GW_HWNDNEXT) = next window below.
-	hwnd := winapi.GetTopWindow(0)
+	// Count tracked windows per desktop for diagnostics only —
+	// rank assignment below does not depend on this.
+	totalTracked := 0
+	for hwnd, m := range apps {
+		if m == nil || !winapi.IsWindow(hwnd) {
+			continue
+		}
+		totalTracked++
+	}
+
+	// Clear stale flags on all tracked windows.
+	for _, m := range apps {
+		if m == nil {
+			continue
+		}
+		m.NeedRestoreStacking = false
+		m.StackingRank = -1
+	}
+
+	// Walk the z-order chain starting from the desktop's topmost child.
+	desktop := winapi.GetDesktopWindow()
+	hwnd := winapi.GetWindow(desktop, winapi.GW_CHILD)
 	rank := 0
 	assigned := 0
 	for hwnd != 0 {
@@ -152,7 +174,10 @@ func (p *Processor) CaptureStackingAll(displayKey string) {
 		}
 		hwnd = winapi.GetWindow(hwnd, winapi.GW_HWNDNEXT)
 	}
-	logger.WindowEvent(logger.LevelDebug, "stacking capture all", "assigned ranks 0-%d to %d tracked windows (displayKey=%s)", rank-1, assigned, displayKey)
+	missed := totalTracked - assigned
+	logger.WindowEvent(logger.LevelDebug, "stacking capture all",
+		"tracked=%d assigned=%d missed=%d (displayKey=%s)",
+		totalTracked, assigned, missed, displayKey)
 }
 
 // --- Disk persistence ---

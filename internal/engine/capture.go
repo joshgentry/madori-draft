@@ -19,6 +19,11 @@ func (p *Processor) BatchCaptureApplicationsOnCurrentDisplays() {
 
 	p.CaptureNewDisplayConfig(displayKey)
 	p.CaptureWindowsOfInterest(displayKey)
+	// Capture z-order for the current virtual desktop so stacking can be
+	// rebuilt during restores. Each desktop's ranks are maintained
+	// independently — when the user switches desktops, the ranks for the
+	// new desktop are fresh while the old desktop's ranks are preserved.
+	p.CaptureStackingAll(displayKey)
 	p.PersistToDB()
 }
 

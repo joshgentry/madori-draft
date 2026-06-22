@@ -1,4 +1,4 @@
-.PHONY: build build-release clean test vet tidy syso
+.PHONY: build build-release build-verify clean test vet tidy syso
 
 APP_NAME = madori
 VERSION = 1.0.0
@@ -14,6 +14,12 @@ build: syso
 		-ldflags="-X main.version=$(VERSION)" \
 		-o $(BUILD_DIR)/$(APP_NAME).exe \
 		./cmd/madori/
+
+# Quick compile check — builds to build/ then removes the binary.
+# Succeeds only if compilation and link complete without errors.
+build-verify:
+	gofmt -w -s .
+	GOOS=windows GOARCH=amd64 go build -o $(BUILD_DIR)/$(APP_NAME)-test-build.exe ./cmd/madori/ && rm $(BUILD_DIR)/$(APP_NAME)-test-build.exe && echo "Build OK"
 
 # Release: build Windows .exe without console window (gui subsystem)
 build-release: syso
